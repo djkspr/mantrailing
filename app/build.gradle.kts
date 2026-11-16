@@ -20,7 +20,11 @@ val firebaseConfig: Map<String, String> = file("google-services.json").takeIf { 
         ((c["client_info"] as Map<String, Any?>)["android_client_info"] as Map<String, Any?>)["package_name"] == "app.mantrailing"
     }
     val webClient = (client["oauth_client"] as List<Map<String, Any?>>? ?: emptyList()).firstOrNull { it["client_type"] == 3 }
-        ?: error("google-services.json : pas d'identifiant OAuth « Web » ; active la connexion Google dans Firebase puis retélécharge le fichier.")
+    if (webClient == null) {
+        // Sans identifiant « Web », pas de connexion Google : la sauvegarde en ligne reste absente de l'appli.
+        logger.warn("google-services.json : connexion Google pas encore activée dans Firebase (oauth_client vide) — sauvegarde en ligne désactivée.")
+        return@let emptyMap<String, String>()
+    }
     mapOf(
         "PROJECT_ID" to project["project_id"] as String,
         "APP_ID" to (client["client_info"] as Map<String, Any?>)["mobilesdk_app_id"] as String,
