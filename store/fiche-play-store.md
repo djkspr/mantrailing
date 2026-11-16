@@ -16,10 +16,10 @@ Mantrailing aide les maîtres-chiens à analyser les séances de pistage de pers
 « Poser une piste » enregistre son parcours avec le GPS du téléphone, jusqu'à la cachette.
 
 2. LE CHIEN TRAVAILLE
-Après le temps de vieillissement, « Démarrer une recherche » : choisissez la piste, l'application enregistre la trace du chien. La piste reste masquée pendant la recherche, pour ne pas influencer le maître-chien.
+Après le temps de vieillissement, « Démarrer une recherche » : choisissez la piste, l'application enregistre la trace du chien. La piste reste masquée pendant la recherche, pour ne pas influencer le maître-chien. D'un appui, notez ce qui se passe : hésitation, perte de piste, reprise, négatif, distraction… (plus de 20 notes, personnalisables).
 
 3. LE BILAN
-À l'arrivée, la piste (bleu) et la trace du chien (orange) s'affichent sur la carte, avec l'âge de la piste, l'écart moyen et maximal du chien, la part de la piste couverte et si l'arrivée a été atteinte. Vous voyez où il a travaillé, où il a dépassé un virage, où il a coupé.
+À l'arrivée, la piste (bleu), la trace du chien (orange) et vos notes s'affichent sur la carte, avec l'âge de la piste, l'écart moyen et maximal du chien, la part de la piste couverte et si l'arrivée a été atteinte. Vous voyez où il a travaillé, où il a dépassé un virage, où il a coupé.
 
 DEUX FAÇONS D'ENREGISTRER LA TRACE DU CHIEN
 • Avec son collier GPS Tractive (compte Tractive) : le mode LIVE est activé automatiquement pendant la recherche

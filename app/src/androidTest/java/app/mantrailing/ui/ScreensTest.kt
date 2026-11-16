@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.mantrailing.TimeRange
@@ -18,7 +19,10 @@ import app.mantrailing.UiState
 import app.mantrailing.data.StoredSession
 import app.mantrailing.demo.DemoSession
 import app.mantrailing.session.ActiveRecording
+import app.mantrailing.session.DEFAULT_QUICK_NOTES
 import app.mantrailing.session.LaidTrail
+import app.mantrailing.session.NoteType
+import app.mantrailing.session.SearchNote
 import app.mantrailing.session.RecordingKind
 import app.mantrailing.session.TrackSource
 import app.mantrailing.session.TrailSession
@@ -95,6 +99,98 @@ class ScreensTest {
         rule.onNodeWithText("Quitter").performClick()
 
         assertEquals(1, exit)
+    }
+
+    // --- Notes pendant la recherche ---
+
+    @Test
+    fun notes_rapides_pendant_la_recherche() {
+        val added = mutableListOf<NoteType>()
+        var undos = 0
+        val start = Instant.now().epochSecond - 200
+        val recording = ActiveRecording("r1", "Rex", TrackSource.PHONE, start, RecordingKind.SEARCH)
+        val notes = listOf(SearchNote("1", start + 30, NoteType.HESITATION), SearchNote("2", start + 150, NoteType.TRACK_LOST))
+        rule.setContent {
+            MaterialTheme {
+                TrackScreen(
+                    UiState(ready = true, recording = recording, recordingNotes = notes),
+                    TrackActions(onAddNote = { type, _ -> added += type }, onUndoNote = { undos++ }),
+                )
+            }
+        }
+
+        rule.onNodeWithTag("quick-notes").assertIsDisplayed()
+        rule.onNodeWithText("Hésitation").performClick()
+        rule.onNodeWithText("Erreur de ma part").performClick()
+        rule.onNodeWithText("2 notes · dernière : Perte de piste (à 2 min 30s)").assertIsDisplayed()
+        rule.onNodeWithText("Annuler").performClick()
+
+        assertEquals(listOf(NoteType.HESITATION, NoteType.HANDLER_ERROR), added)
+        assertEquals(1, undos)
+    }
+
+    @Test
+    fun pas_de_notes_pendant_la_pose_de_piste() {
+        val recording = ActiveRecording("t1", "Rex", TrackSource.PHONE, Instant.now().epochSecond, RecordingKind.TRAIL)
+        rule.setContent { MaterialTheme { TrackScreen(UiState(ready = true, recording = recording), TrackActions()) } }
+        rule.onNodeWithTag("quick-notes").assertDoesNotExist()
+    }
+
+    @Test
+    fun autre_note_et_note_libre() {
+        val picked = mutableListOf<Pair<NoteType, String?>>()
+        rule.setContent { MaterialTheme { AllNotesDialog(onPick = { t, c -> picked += t to c }, onDismiss = {}) } }
+
+        rule.onNodeWithText("L'environnement").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Vent").performScrollTo().performClick()
+        rule.onNodeWithText("Ajouter la note libre").performScrollTo().assertIsNotEnabled()
+        rule.onNodeWithTag("free-note").performScrollTo().performTextInput("Biche croisée")
+        rule.onNodeWithText("Ajouter la note libre").performScrollTo().performClick()
+
+        assertEquals(listOf(NoteType.WIND to null, NoteType.FREE to "Biche croisée"), picked)
+    }
+
+    @Test
+    fun notes_d_une_recherche_completees_puis_supprimees() {
+        val updated = mutableListOf<SearchNote>()
+        val deleted = mutableListOf<SearchNote>()
+        val dog = listOf(Position(1_000, 48.0, 2.0), Position(1_300, 48.001, 2.0))
+        val notes = listOf(
+            SearchNote("n1", 1_100, NoteType.HESITATION, lat = 48.0, lon = 2.0),
+            SearchNote("n2", 1_200, NoteType.FREE, comment = "Biche croisée", lat = 48.001, lon = 2.0),
+        )
+        val session = TrailSession("s1", "Rex", TrackSource.PHONE, 1_000, 1_300, listOf(dog), notes = notes)
+        val state = UiState(ready = true, openedSession = session, segments = session.segments, stats = TrackStats.of(session.segments), notes = notes)
+        rule.setContent {
+            MaterialTheme { TrackScreen(state, TrackActions(onUpdateNote = { updated += it }, onDeleteNote = { deleted += it })) }
+        }
+
+        rule.onNodeWithTag("notes-button").assertIsDisplayed().performClick()
+        rule.onNodeWithText("Notes de la recherche").assertIsDisplayed()
+        rule.onNodeWithText("Biche croisée").assertIsDisplayed()
+        rule.onNodeWithText("Hésitation").performClick()
+        rule.onNodeWithText("Le chien · à 1 min 40s du départ").assertIsDisplayed()
+        rule.onNodeWithTag("note-comment").performTextInput("au carrefour")
+        rule.onNodeWithText("Enregistrer").performClick()
+        assertEquals("au carrefour", updated.single().comment)
+
+        rule.onNodeWithTag("notes-button").performClick()
+        rule.onNodeWithText("Biche croisée").performClick()
+        rule.onNodeWithText("Supprimer la note").performClick()
+        rule.onNodeWithText("Supprimer définitivement").performClick()
+        assertEquals("n2", deleted.single().id)
+    }
+
+    @Test
+    fun parametres_notes_rapides_six_au_maximum() {
+        val changes = mutableListOf<List<NoteType>>()
+        rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onQuickNotes = { changes += it })) } }
+
+        rule.onNodeWithText("Boutons affichés pendant la recherche (6/6)", substring = true).assertExists()
+        rule.onNodeWithTag("quick-WIND").assertIsNotEnabled() // déjà 6 notes rapides
+        rule.onNodeWithTag("quick-HESITATION").performScrollTo().performClick() // décochée
+
+        assertEquals(DEFAULT_QUICK_NOTES - NoteType.HESITATION, changes.single())
     }
 
     // --- Piste du traceur ---
@@ -295,19 +391,43 @@ class ScreensTest {
 
     @Test
     fun piste_en_cours_au_gps_du_telephone() {
-        var stops = 0
+        val stops = mutableListOf<NoteType?>()
         val recording = ActiveRecording("r1", "Rex", TrackSource.PHONE, Instant.now().epochSecond - 125)
         val state = UiState(ready = true, recording = recording, recordingPoints = 42)
-        rule.setContent { MaterialTheme { TrackScreen(state, TrackActions(onStopRecording = { stops++ })) } }
+        rule.setContent { MaterialTheme { TrackScreen(state, TrackActions(onStopRecording = { stops += it })) } }
 
         rule.onNodeWithText("Recherche en cours", substring = true).assertIsDisplayed()
         rule.onNodeWithText("Sans piste enregistrée").assertIsDisplayed()
         rule.onNodeWithText("GPS du téléphone · 42 positions").assertIsDisplayed()
         rule.onNodeWithTag("record").assertDoesNotExist()
         rule.onNodeWithTag("welcome").assertDoesNotExist()
+
+        // Terminer demande l'issue de la recherche ; « Continuer » ne termine rien.
+        rule.onNodeWithText("Terminer la recherche").performClick()
+        rule.onNodeWithText("Fin de la recherche").assertIsDisplayed()
+        rule.onNodeWithText("Continuer la recherche").performClick()
+        assertTrue(stops.isEmpty())
+
+        rule.onNodeWithText("Terminer la recherche").performClick()
+        rule.onNodeWithText("Trouvé").performClick()
+        rule.onNodeWithText("Terminer la recherche").performClick()
+        rule.onNodeWithText("Terminer sans préciser").performClick()
+
+        assertEquals(listOf(NoteType.FOUND, null), stops)
+    }
+
+    @Test
+    fun issue_deja_notee_terminer_directement() {
+        val stops = mutableListOf<NoteType?>()
+        val start = Instant.now().epochSecond - 60
+        val recording = ActiveRecording("r1", "Rex", TrackSource.PHONE, start)
+        val state = UiState(ready = true, recording = recording, recordingNotes = listOf(SearchNote("n", start + 50, NoteType.ABANDON)))
+        rule.setContent { MaterialTheme { TrackScreen(state, TrackActions(onStopRecording = { stops += it })) } }
+
         rule.onNodeWithText("Terminer la recherche").performClick()
 
-        assertEquals(1, stops)
+        rule.onNodeWithText("Fin de la recherche").assertDoesNotExist()
+        assertEquals(listOf<NoteType?>(null), stops)
     }
 
     @Test
@@ -434,7 +554,7 @@ class ScreensTest {
         var sent: Pair<String, String>? = null
         rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onLogin = { e, p -> sent = e to p })) } }
 
-        rule.onNodeWithText("Politique de confidentialité").assertIsDisplayed()
+        rule.onNodeWithText("Politique de confidentialité").performScrollTo().assertIsDisplayed()
         rule.onNodeWithText("Se connecter").assertIsNotEnabled()
         rule.onNodeWithTag("email").performTextInput("moi@example.com")
         rule.onNodeWithText("Se connecter").assertIsNotEnabled()

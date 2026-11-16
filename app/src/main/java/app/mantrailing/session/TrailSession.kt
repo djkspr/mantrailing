@@ -47,6 +47,8 @@ data class TrailSession(
     val trail: List<Position> = emptyList(),
     /** Fin de la pose de la piste, pour calculer son âge au départ du chien. */
     val trailEndedAt: Long? = null,
+    /** Notes posées pendant la recherche. */
+    val notes: List<SearchNote> = emptyList(),
 ) {
     /** Âge de la piste au départ du chien, en secondes. */
     val trailAgeSeconds: Long? get() = trailEndedAt?.let { (startedAt - it).coerceAtLeast(0) }
@@ -103,23 +105,39 @@ fun availableTrails(trails: List<LaidTrail>, sessions: List<TrailSession>, now: 
 }
 
 /**
- * Positions du téléphone pendant l'enregistrement, ajoutées une par ligne :
- * rien n'est perdu si l'appli est arrêtée en cours de piste.
+ * Éléments ajoutés un par ligne pendant un enregistrement :
+ * rien n'est perdu si l'appli est arrêtée en cours de route.
  */
-class RecordingBuffer(private val file: File) {
-    fun append(position: Position) {
+open class JsonLinesBuffer<T>(private val file: File, private val serializer: KSerializer<T>) {
+    fun append(item: T) {
         file.parentFile?.mkdirs()
-        file.appendText(json.encodeToString(position) + "\n")
+        file.appendText(json.encodeToString(serializer, item) + "\n")
     }
 
-    fun read(): List<Position> =
+    /** Les lignes illisibles (arrêt brutal pendant une écriture) sont ignorées. */
+    fun read(): List<T> =
         if (!file.exists()) emptyList()
-        else file.readLines().filter { it.isNotBlank() }.mapNotNull { runCatching { json.decodeFromString<Position>(it) }.getOrNull() }
+        else file.readLines().filter { it.isNotBlank() }.mapNotNull { runCatching { json.decodeFromString(serializer, it) }.getOrNull() }
+
+    /** Retire le dernier élément ajouté et le renvoie. */
+    fun removeLast(): T? {
+        val items = read()
+        val last = items.lastOrNull() ?: return null
+        clear()
+        items.dropLast(1).forEach(::append)
+        return last
+    }
 
     fun clear() {
         file.delete()
     }
 }
+
+/** Positions du téléphone pendant l'enregistrement. */
+class RecordingBuffer(file: File) : JsonLinesBuffer<Position>(file, Position.serializer())
+
+/** Notes posées pendant la recherche en cours. */
+class NotesBuffer(file: File) : JsonLinesBuffer<SearchNote>(file, SearchNote.serializer())
 
 /** Source utilisée au démarrage d'une piste. */
 sealed interface StartDecision {

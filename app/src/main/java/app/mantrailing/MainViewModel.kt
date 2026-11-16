@@ -10,6 +10,11 @@ import app.mantrailing.recording.PhoneRecordingService
 import app.mantrailing.session.ActiveRecording
 import app.mantrailing.session.LaidTrail
 import app.mantrailing.session.LaidTrailRepository
+import app.mantrailing.session.DEFAULT_QUICK_NOTES
+import app.mantrailing.session.NoteType
+import app.mantrailing.session.NotesBuffer
+import app.mantrailing.session.SearchNote
+import app.mantrailing.session.locateNotes
 import app.mantrailing.session.RecordingKind
 import app.mantrailing.session.SessionRepository
 import app.mantrailing.session.TrackSource
@@ -83,6 +88,12 @@ data class UiState(
     val openedTrail: LaidTrail? = null,
     /** Piste du traceur dessinée sur la carte (avec ou sans trace du chien). */
     val trailLine: List<Position> = emptyList(),
+    /** Notes posées pendant la recherche en cours. */
+    val recordingNotes: List<SearchNote> = emptyList(),
+    /** Notes rapides proposées pendant la recherche. */
+    val quickNotes: List<NoteType> = DEFAULT_QUICK_NOTES,
+    /** Notes affichées sur la carte (recherche enregistrée ou démo). */
+    val notes: List<SearchNote> = emptyList(),
 ) {
     val connected get() = stored?.pet != null
     val dogName get() = stored?.pet?.name ?: "Mon chien"
@@ -93,6 +104,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val api = TractiveApi()
     private val repository = SessionRepository(File(app.filesDir, "sessions"))
     private val trailRepository = LaidTrailRepository(File(app.filesDir, "trails"))
+    private val notesBuffer = NotesBuffer(File(app.filesDir, "recording/notes.jsonl"))
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -106,6 +118,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(
                     ready = true, stored = stored, trackSource = store.trackSource.first(),
                     recording = recording, sessions = sessions, trails = trails,
+                    quickNotes = store.quickNotes.first(),
+                    recordingNotes = if (recording?.kind == RecordingKind.SEARCH) withContext(Dispatchers.IO) { notesBuffer.read() } else emptyList(),
                 )
             }
             if (stored != null && stored.pet == null) loadPets()
@@ -142,6 +156,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             segments = DemoSession.segments,
             stats = TrackStats.of(DemoSession.segments),
             trailLine = DemoSession.trail,
+            notes = DemoSession.notes,
             loadedOnce = true,
             message = null,
         )
@@ -150,7 +165,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun exitDemo() = _state.update {
         it.copy(
             demo = false, range = TimeRange.lastHours(3), segments = emptyList(), stats = null,
-            trailLine = emptyList(), loadedOnce = false, message = null,
+            trailLine = emptyList(), notes = emptyList(), loadedOnce = false, message = null,
         )
     }
 
@@ -265,16 +280,64 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+        withContext(Dispatchers.IO) { notesBuffer.clear() }
         store.saveActiveRecording(recording)
-        _state.update { it.copy(recording = recording, message = message).clearedDisplay() }
+        _state.update { it.copy(recording = recording, recordingNotes = emptyList(), message = message).clearedDisplay() }
+    }
+
+    // ---------- Notes pendant la recherche ----------
+
+    /** Note posée maintenant ; sa position sera retrouvée sur la trace à la fin de la recherche. */
+    fun addNote(type: NoteType, comment: String? = null) {
+        val recording = _state.value.recording?.takeIf { it.kind == RecordingKind.SEARCH } ?: return
+        val note = SearchNote(UUID.randomUUID().toString(), Instant.now().epochSecond, type, comment?.trim()?.takeIf { it.isNotEmpty() })
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { notesBuffer.append(note) }
+            if (_state.value.recording?.id == recording.id) _state.update { it.copy(recordingNotes = it.recordingNotes + note) }
+        }
+    }
+
+    /** Annule la dernière note (appui par erreur, le chien tire sur la longe…). */
+    fun undoLastNote() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { notesBuffer.removeLast() }
+            _state.update { it.copy(recordingNotes = it.recordingNotes.dropLast(1)) }
+        }
+    }
+
+    /** Complète ou corrige une note d'une recherche enregistrée. */
+    fun updateNote(note: SearchNote) = editNotes { notes -> notes.map { if (it.id == note.id) note else it } }
+
+    fun deleteNote(note: SearchNote) = editNotes { notes -> notes.filter { it.id != note.id } }
+
+    private fun editNotes(change: (List<SearchNote>) -> List<SearchNote>) {
+        val session = _state.value.openedSession ?: return
+        val updated = session.copy(notes = change(session.notes))
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { repository.save(updated) }
+            _state.update {
+                it.copy(
+                    openedSession = updated,
+                    notes = updated.notes,
+                    sessions = it.sessions.map { old -> if (old.id == updated.id) updated else old },
+                )
+            }
+        }
+    }
+
+    fun setQuickNotes(types: List<NoteType>) {
+        viewModelScope.launch {
+            store.saveQuickNotes(types)
+            _state.update { it.copy(quickNotes = types) }
+        }
     }
 
     /** Termine l'enregistrement en cours : pose de la piste ou recherche du chien. */
-    fun stopRecording() = run {
+    fun stopRecording(outcome: NoteType? = null) = run {
         val recording = _state.value.recording ?: return@run
         when (recording.kind) {
             RecordingKind.TRAIL -> finishTrail(recording)
-            RecordingKind.SEARCH -> finishSearch(recording)
+            RecordingKind.SEARCH -> finishSearch(recording, outcome)
         }
     }
 
@@ -298,8 +361,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         showTrail(trail)
     }
 
-    private suspend fun finishSearch(recording: ActiveRecording) {
+    private suspend fun finishSearch(recording: ActiveRecording, outcome: NoteType?) {
         val endedAt = Instant.now().epochSecond
+        // Issue choisie en terminant : notée à l'heure de fin (écrite avant la relecture des notes).
+        if (outcome != null) withContext(Dispatchers.IO) { notesBuffer.append(SearchNote(UUID.randomUUID().toString(), endedAt, outcome)) }
         var message: String? = null
         val segments: List<List<Position>> = when (recording.source) {
             TrackSource.PHONE -> {
@@ -315,15 +380,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val trail = recording.trailId?.let { id ->
             _state.value.trails.find { it.id == id } ?: withContext(Dispatchers.IO) { trailRepository.load(id) }
         }
+        val notes = withContext(Dispatchers.IO) { notesBuffer.read() }
         val session = TrailSession(
             recording.id, recording.dogName, recording.source, recording.startedAt, endedAt, segments,
             trailId = trail?.id, trail = trail?.points.orEmpty(), trailEndedAt = trail?.endedAt,
+            notes = locateNotes(notes, segments.flatten()),
         )
-        withContext(Dispatchers.IO) { repository.save(session) }
+        withContext(Dispatchers.IO) {
+            repository.save(session)
+            notesBuffer.clear()
+        }
         store.saveActiveRecording(null)
         _state.update {
             it.copy(
                 recording = null,
+                recordingNotes = emptyList(),
                 sessions = listOf(session) + it.sessions.filter { old -> old.id != session.id },
                 message = message,
             )
@@ -362,7 +433,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (segments.isEmpty()) {
                 _state.update { it.copy(message = "Le collier n'a toujours pas transmis de positions pour cette recherche.") }
             } else {
-                val updated = session.copy(segments = segments)
+                // Notes posées avant que le collier ait transmis ses positions : on les place maintenant.
+                val updated = session.copy(segments = segments, notes = locateNotes(session.notes, segments.flatten()))
                 withContext(Dispatchers.IO) { repository.save(updated) }
                 _state.update { it.copy(sessions = it.sessions.map { old -> if (old.id == updated.id) updated else old }) }
                 showSession(updated)
@@ -373,7 +445,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun showSession(session: TrailSession) = _state.update {
         it.copy(
             openedSession = session, openedTrail = null, demo = false, segments = session.segments,
-            stats = TrackStats.of(session.segments), trailLine = session.trail, loadedOnce = true,
+            stats = TrackStats.of(session.segments), trailLine = session.trail, notes = session.notes, loadedOnce = true,
         )
     }
 
@@ -382,7 +454,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun showTrail(trail: LaidTrail) = _state.update {
         it.copy(
             openedTrail = trail, openedSession = null, demo = false, segments = emptyList(),
-            stats = null, trailLine = trail.points, loadedOnce = true,
+            stats = null, trailLine = trail.points, notes = emptyList(), loadedOnce = true,
         )
     }
 
@@ -391,7 +463,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Plus rien d'affiché sur la carte. */
     private fun UiState.clearedDisplay() = copy(
         demo = false, openedSession = null, openedTrail = null, segments = emptyList(), stats = null,
-        trailLine = emptyList(), loadedOnce = false,
+        trailLine = emptyList(), notes = emptyList(), loadedOnce = false,
     )
 
     fun deleteTrail(trail: LaidTrail) {

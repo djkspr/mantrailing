@@ -137,6 +137,7 @@ private fun App(vm: MainViewModel = viewModel()) {
                     onChangePet = vm::changePet,
                     onLogout = vm::logout,
                     onTrackSource = vm::setTrackSource,
+                    onQuickNotes = vm::setQuickNotes,
                 ),
             )
         }
@@ -174,6 +175,10 @@ private fun App(vm: MainViewModel = viewModel()) {
                 onStopRecording = vm::stopRecording,
                 onOpenSessions = { screen = Screen.SESSIONS },
                 onCloseSession = vm::closeSession,
+                onAddNote = vm::addNote,
+                onUndoNote = vm::undoLastNote,
+                onUpdateNote = vm::updateNote,
+                onDeleteNote = vm::deleteNote,
             ),
         )
     }

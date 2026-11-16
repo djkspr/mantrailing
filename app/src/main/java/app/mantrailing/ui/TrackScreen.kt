@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -44,6 +45,9 @@ import app.mantrailing.TimeRange
 import app.mantrailing.UiState
 import app.mantrailing.demo.DemoSession
 import app.mantrailing.session.LaidTrail
+import app.mantrailing.session.NoteCategory
+import app.mantrailing.session.NoteType
+import app.mantrailing.session.SearchNote
 import app.mantrailing.session.RecordingKind
 import app.mantrailing.session.TrackSource
 import app.mantrailing.track.TrackStats
@@ -75,9 +79,14 @@ data class TrackActions(
     val onLayTrail: () -> Unit = {},
     /** Démarrer la recherche directement sur la piste affichée. */
     val onStartSearchOnTrail: (LaidTrail) -> Unit = {},
-    val onStopRecording: () -> Unit = {},
+    /** Terminer l'enregistrement ; pour une recherche, avec son issue (Trouvé…) ajoutée aux notes. */
+    val onStopRecording: (NoteType?) -> Unit = {},
     val onOpenSessions: () -> Unit = {},
     val onCloseSession: () -> Unit = {},
+    val onAddNote: (NoteType, String?) -> Unit = { _, _ -> },
+    val onUndoNote: () -> Unit = {},
+    val onUpdateNote: (SearchNote) -> Unit = {},
+    val onDeleteNote: (SearchNote) -> Unit = {},
 )
 
 /** Écran d'accueil : la carte, la pose d'une piste, la recherche en cours, ou une piste / recherche enregistrée. */
@@ -85,6 +94,12 @@ data class TrackActions(
 fun TrackScreen(state: UiState, actions: TrackActions) {
     var menuOpen by remember { mutableStateOf(false) }
     var showPeriod by rememberSaveable { mutableStateOf(false) }
+    var showAllNotes by rememberSaveable { mutableStateOf(false) }
+    var showNotesList by rememberSaveable { mutableStateOf(false) }
+    var editedNoteId by rememberSaveable { mutableStateOf<String?>(null) }
+    var askOutcome by rememberSaveable { mutableStateOf(false) }
+    // Départ du chien, pour situer les notes dans le temps.
+    val notesStart = state.openedSession?.startedAt ?: DemoSession.segments.first().first().time
     val title = when {
         state.demo -> "${DemoSession.DOG_NAME} (démo)"
         state.openedSession != null -> state.openedSession.dogName
@@ -119,7 +134,20 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
                 }
             }
             when {
-                state.recording != null -> RecordingBanner(state, actions.onStopRecording)
+                state.recording != null -> {
+                    RecordingBanner(state) {
+                        // Issue de la recherche demandée, sauf si elle a déjà été notée.
+                        val searching = state.recording.kind == RecordingKind.SEARCH
+                        if (searching && state.recordingNotes.none { it.type.category == NoteCategory.END }) askOutcome = true
+                        else actions.onStopRecording(null)
+                    }
+                    if (state.recording.kind == RecordingKind.SEARCH) {
+                        QuickNotesBar(
+                            state.quickNotes, state.recordingNotes, state.recording.startedAt,
+                            onAdd = { actions.onAddNote(it, null) }, onOther = { showAllNotes = true }, onUndo = actions.onUndoNote,
+                        )
+                    }
+                }
                 state.demo -> InfoBar(
                     "Séance de démonstration : données fictives. Piste de ${formatDuration(DemoSession.segments.first().first().time - DemoSession.trailEndedAt)}.",
                     "Quitter" to actions.onExitDemo,
@@ -160,7 +188,10 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            TrackMap(state.segments, Modifier.fillMaxSize(), trail = state.trailLine)
+            TrackMap(
+                state.segments, Modifier.fillMaxSize(), trail = state.trailLine,
+                notes = state.notes, onNoteClick = { editedNoteId = it.id },
+            )
             val idle = !state.demo && state.recording == null && state.openedSession == null && state.openedTrail == null && state.segments.isEmpty()
             if (!state.connected && idle) Welcome(state, actions, Modifier.align(Alignment.Center))
             state.message?.let { msg ->
@@ -174,9 +205,26 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
         }
         val deviation = remember(state.trailLine, state.segments) { TrailDeviation.of(state.trailLine, state.segments.flatten()) }
         when {
-            state.stats != null && state.stats.pointCount > 0 -> StatsPanel(state.stats, deviation)
+            state.stats != null && state.stats.pointCount > 0 -> StatsPanel(state.stats, deviation, state.notes.size) { showNotesList = true }
             state.openedTrail != null -> TrailPanel(state.openedTrail)
         }
+    }
+    if (askOutcome) {
+        OutcomeDialog(onFinish = { askOutcome = false; actions.onStopRecording(it) }, onDismiss = { askOutcome = false })
+    }
+    if (showAllNotes) {
+        AllNotesDialog(onPick = { type, comment -> actions.onAddNote(type, comment); showAllNotes = false }, onDismiss = { showAllNotes = false })
+    }
+    if (showNotesList) {
+        NotesListDialog(state.notes, notesStart, onSelect = { showNotesList = false; editedNoteId = it.id }, onDismiss = { showNotesList = false })
+    }
+    state.notes.find { it.id == editedNoteId }?.let { note ->
+        NoteEditDialog(
+            note, notesStart,
+            onSave = { actions.onUpdateNote(it); editedNoteId = null },
+            onDelete = { actions.onDeleteNote(it); editedNoteId = null },
+            onDismiss = { editedNoteId = null },
+        )
     }
 }
 
@@ -379,7 +427,7 @@ private fun RangePicker(range: TimeRange, onChange: (TimeRange) -> Unit) {
 }
 
 @Composable
-private fun StatsPanel(stats: TrackStats, deviation: TrailDeviation?) {
+private fun StatsPanel(stats: TrackStats, deviation: TrailDeviation?, notesCount: Int = 0, onShowNotes: () -> Unit = {}) {
     Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth().testTag("stats")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth()) {
@@ -396,7 +444,8 @@ private fun StatsPanel(stats: TrackStats, deviation: TrailDeviation?) {
                 }
                 Row(Modifier.fillMaxWidth()) {
                     Stat("Piste couverte", "%.0f %%".format(deviation.coverage * 100), Modifier.weight(1f))
-                    Stat("Arrivée", if (deviation.reachedEnd) "Atteinte" else "Pas atteinte", Modifier.weight(2f))
+                    Stat("Arrivée", if (deviation.reachedEnd) "Atteinte" else "Pas atteinte", Modifier.weight(1f))
+                    NotesButton(notesCount, onShowNotes, Modifier.weight(1f))
                 }
                 return@Column
             }
@@ -412,7 +461,20 @@ private fun StatsPanel(stats: TrackStats, deviation: TrailDeviation?) {
                     color = MaterialTheme.colorScheme.error,
                 )
             }
+            if (notesCount > 0) NotesButton(notesCount, onShowNotes, Modifier)
         }
+    }
+}
+
+/** Accès aux notes de la recherche (aussi touchables sur la carte). */
+@Composable
+private fun NotesButton(count: Int, onClick: () -> Unit, modifier: Modifier) {
+    if (count == 0) {
+        Spacer(modifier)
+        return
+    }
+    TextButton(onClick = onClick, modifier = modifier.testTag("notes-button")) {
+        Text("$count note${if (count > 1) "s" else ""}", style = MaterialTheme.typography.titleMedium)
     }
 }
 

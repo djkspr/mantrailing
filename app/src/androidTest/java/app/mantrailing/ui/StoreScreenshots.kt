@@ -44,7 +44,7 @@ class StoreScreenshots {
         val segments = DemoSession.segments
         val session = TrailSession(
             "demo", DemoSession.DOG_NAME, TrackSource.PHONE, segments.first().first().time, segments.last().last().time, segments,
-            trailId = "demo-trail", trail = DemoSession.trail, trailEndedAt = DemoSession.trailEndedAt,
+            trailId = "demo-trail", trail = DemoSession.trail, trailEndedAt = DemoSession.trailEndedAt, notes = DemoSession.notes,
         )
         val state = UiState(
             ready = true,
@@ -53,6 +53,7 @@ class StoreScreenshots {
             segments = segments,
             stats = TrackStats.of(segments),
             trailLine = session.trail,
+            notes = session.notes,
             loadedOnce = true,
         )
         rule.setContent {

@@ -41,6 +41,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.RadioButton
 import androidx.compose.ui.semantics.Role
 import app.mantrailing.UiState
+import app.mantrailing.session.NoteType
 import app.mantrailing.session.TrackSource
 import app.mantrailing.tractive.Pet
 
@@ -54,6 +55,7 @@ data class SettingsActions(
     val onChangePet: () -> Unit = {},
     val onLogout: () -> Unit = {},
     val onTrackSource: (TrackSource) -> Unit = {},
+    val onQuickNotes: (List<NoteType>) -> Unit = {},
 )
 
 @Composable
@@ -86,6 +88,9 @@ fun SettingsScreen(state: UiState, actions: SettingsActions) {
 
         HorizontalDivider()
         TrackSourceSetting(state, actions.onTrackSource)
+
+        HorizontalDivider()
+        QuickNotesSetting(state.quickNotes, actions.onQuickNotes)
 
         HorizontalDivider()
         val uriHandler = LocalUriHandler.current

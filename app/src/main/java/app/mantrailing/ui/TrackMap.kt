@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -21,6 +22,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.mantrailing.session.NoteCategory
+import app.mantrailing.session.SearchNote
 import app.mantrailing.tractive.Position
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
@@ -73,10 +76,19 @@ private val STYLE_JSON = """
 private const val DOG_SOURCE = "dog"
 private const val TRAIL_SOURCE = "trail"
 private const val TRAIL_ENDS_SOURCE = "trail-ends"
+private const val NOTES_SOURCE = "notes"
 
 @Composable
 /** Carte : trace du chien ([segments], orange) et piste posée par le traceur ([trail], bleu pointillé). */
-fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier, trail: List<Position> = emptyList()) {
+fun TrackMap(
+    segments: List<List<Position>>,
+    modifier: Modifier = Modifier,
+    trail: List<Position> = emptyList(),
+    notes: List<SearchNote> = emptyList(),
+    onNoteClick: (SearchNote) -> Unit = {},
+) {
+    val currentNotes by rememberUpdatedState(notes)
+    val currentOnNoteClick by rememberUpdatedState(onNoteClick)
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val mapView = remember {
@@ -171,6 +183,28 @@ fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier, trai
                         PropertyFactory.circleStrokeWidth(3f),
                     ),
                 )
+                // Notes du maître-chien : un repère coloré par famille, touché pour lire ou modifier la note.
+                style.addSource(GeoJsonSource(NOTES_SOURCE))
+                style.addLayer(
+                    CircleLayer("notes", NOTES_SOURCE).withProperties(
+                        PropertyFactory.circleRadius(9f),
+                        PropertyFactory.circleColor(
+                            Expression.match(
+                                Expression.get("cat"), Expression.literal(NoteCategory.FREE.color),
+                                *NoteCategory.entries.map { Expression.stop(it.name, it.color) }.toTypedArray(),
+                            ),
+                        ),
+                        PropertyFactory.circleStrokeColor("#FFFFFF"),
+                        PropertyFactory.circleStrokeWidth(3f),
+                    ),
+                )
+                m.addOnMapClickListener { latLng ->
+                    val id = m.queryRenderedFeatures(m.projection.toScreenLocation(latLng), "notes")
+                        .firstOrNull()?.getStringProperty("id")
+                    val note = currentNotes.find { it.id == id }
+                    note?.let(currentOnNoteClick)
+                    note != null
+                }
                 map = m to style
             }
         }
@@ -181,6 +215,11 @@ fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier, trai
         BASE_LAYERS.forEachIndexed { i, (id, _) ->
             style.getLayer(id)?.setProperties(PropertyFactory.visibility(if (i == baseIndex) Property.VISIBLE else Property.NONE))
         }
+    }
+
+    LaunchedEffect(map, notes) {
+        val (_, style) = map ?: return@LaunchedEffect
+        style.getSourceAs<GeoJsonSource>(NOTES_SOURCE)?.setGeoJson(noteFeatures(notes))
     }
 
     LaunchedEffect(map, segments, trail) {
@@ -231,3 +270,14 @@ private fun trailEnds(trail: List<Position>): FeatureCollection {
 const val TRAIL_COLOR = "#1C6DD0"
 private const val TRAIL_START_COLOR = "#2B8A3E"
 private const val TRAIL_END_COLOR = "#C92A2A"
+private fun noteFeatures(notes: List<SearchNote>): FeatureCollection =
+    FeatureCollection.fromFeatures(
+        notes.mapNotNull { note ->
+            val lat = note.lat ?: return@mapNotNull null
+            val lon = note.lon ?: return@mapNotNull null
+            Feature.fromGeometry(Point.fromLngLat(lon, lat)).apply {
+                addStringProperty("id", note.id)
+                addStringProperty("cat", note.type.category.name)
+            }
+        },
+    )

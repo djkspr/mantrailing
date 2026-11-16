@@ -1,6 +1,9 @@
 package app.mantrailing.demo
 
 import app.mantrailing.TimeRange
+import app.mantrailing.session.NoteType
+import app.mantrailing.session.SearchNote
+import app.mantrailing.session.locateNotes
 import app.mantrailing.tractive.Position
 import java.time.LocalDate
 import java.time.LocalTime
@@ -31,6 +34,21 @@ object DemoSession {
 
     /** Recherche d'environ 12 min en mode LIVE (un point toutes les 3 s), avec une hésitation et un retour en arrière. */
     val segments: List<List<Position>> by lazy { listOf(track()) }
+
+    /** Notes posées par le maître-chien pendant la recherche de démonstration. */
+    val notes: List<SearchNote> by lazy {
+        val track = segments.first()
+        locateNotes(
+            listOf(
+                SearchNote("demo-1", track[30].time, NoteType.NOSE_DOWN),
+                SearchNote("demo-2", track[96].time, NoteType.HESITATION),
+                SearchNote("demo-3", track[118].time, NoteType.TRACK_LOST, comment = "A filé tout droit au virage"),
+                SearchNote("demo-4", track[150].time, NoteType.TRACK_RESUMED),
+                SearchNote("demo-5", track.last().time, NoteType.FOUND),
+            ),
+            track,
+        )
+    }
 
     /** Fin de la pose de la piste : 45 min avant le départ du chien. */
     val trailEndedAt: Long = date.atTime(9, 29).atZone(ZoneId.of("Europe/Paris")).toEpochSecond()
