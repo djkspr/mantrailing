@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.mantrailing.data.SessionStore
 import app.mantrailing.data.StoredSession
+import app.mantrailing.demo.DemoSession
 import app.mantrailing.track.TrackStats
 import app.mantrailing.tractive.Pet
 import app.mantrailing.tractive.Position
@@ -51,7 +52,11 @@ data class UiState(
     val segments: List<List<Position>> = emptyList(),
     val stats: TrackStats? = null,
     val loadedOnce: Boolean = false,
-)
+    /** Séance fictive affichée, sans compte Tractive. */
+    val demo: Boolean = false,
+) {
+    val connected get() = stored?.pet != null
+}
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = SessionStore(app)
@@ -68,10 +73,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun login(email: String, password: String) = run {
+        if (DemoSession.isDemoAccount(email, password)) {
+            startDemo()
+            _state.update { it.copy(message = "Compte de démonstration : séance fictive affichée sur l'accueil.") }
+            return@run
+        }
         val session = api.login(email.trim(), password)
         store.saveSession(session)
-        _state.update { it.copy(stored = StoredSession(session, null)) }
+        _state.update { it.copy(stored = StoredSession(session, null), demo = false, segments = emptyList(), stats = null) }
         fetchPets()
+    }
+
+    fun startDemo() = _state.update {
+        it.copy(
+            demo = true,
+            range = DemoSession.range,
+            segments = DemoSession.segments,
+            stats = TrackStats.of(DemoSession.segments),
+            loadedOnce = true,
+            message = null,
+        )
+    }
+
+    fun exitDemo() = _state.update {
+        it.copy(demo = false, range = TimeRange.lastHours(3), segments = emptyList(), stats = null, loadedOnce = false, message = null)
     }
 
     fun loadPets() = run { fetchPets() }
@@ -88,7 +113,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun selectPetNow(pet: Pet) {
         store.savePet(pet)
-        _state.update { s -> s.copy(stored = s.stored?.copy(pet = pet)) }
+        _state.update { s -> s.copy(stored = s.stored?.copy(pet = pet), demo = false) }
     }
 
     fun changePet() {
@@ -100,6 +125,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadTrack() = run {
         val s = _state.value
+        if (s.demo) return@run
         val session = s.stored?.session ?: return@run
         val tracker = s.stored.pet?.trackerId ?: error("Ce chien n'a pas de collier associé.")
         require(s.range.isValid) { "L'heure de fin doit être après l'heure de début." }
@@ -116,6 +142,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setLive(active: Boolean) = run {
         val s = _state.value
+        if (s.demo) return@run
         val session = s.stored?.session ?: return@run
         val tracker = s.stored.pet?.trackerId ?: error("Ce chien n'a pas de collier associé.")
         api.setLiveTracking(session, tracker, active)

@@ -22,6 +22,7 @@ FONCTIONNALITÉS
 • Bilan de la recherche : distance, durée, fréquence des positions, précision GPS
 • Activation du mode LIVE du collier depuis l'application, pour une position toutes les quelques secondes pendant la recherche
 • Alerte quand les positions sont trop espacées pour une analyse fiable
+• Séance de démonstration pour découvrir l'application sans collier
 
 CONSEIL
 Activez le mode LIVE avant de lancer le chien : hors mode LIVE, le collier n'envoie une position que toutes les quelques minutes, ce qui est trop peu pour suivre une piste.
@@ -33,6 +34,19 @@ EN PRÉPARATION
 Enregistrement de la piste du traceur, superposition avec la trace du chien et mesure des écarts, carnet d'entraînement.
 
 Mantrailing est une application indépendante, ni affiliée à Tractive, ni approuvée par Tractive. Un abonnement Tractive actif est nécessaire pour accéder aux positions du collier.
+
+## Accès à l'application (Play Console > Contenu de l'application)
+
+Choisir « Tout ou partie des fonctionnalités sont limitées », puis ajouter des instructions :
+
+- Nom : Compte de démonstration
+- Nom d'utilisateur : demo@mantrailing.app
+- Mot de passe : demo-mantrailing
+- Autres informations :
+  > L'application récupère la trace GPS d'un collier Tractive (service tiers, collier physique et abonnement requis).
+  > Pour l'examen, aucun compte Tractive n'est nécessaire : sur l'écran d'accueil, appuyez sur « Voir une séance de
+  > démonstration », ou saisissez les identifiants ci-dessus dans Menu (⋮) > Paramètres > Collier GPS Tractive.
+  > Une séance fictive complète s'affiche alors (carte, trace, bilan), sans connexion à Tractive.
 
 ## Visuels
 

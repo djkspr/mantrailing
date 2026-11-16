@@ -14,17 +14,23 @@ if (git status --porcelain) {
     throw 'Des modifications ne sont pas commitées : le versionCode (nombre de commits) ne serait pas unique.'
 }
 
-$tasks = @('clean', 'testDebugUnitTest')
+& .\gradlew.bat clean testDebugUnitTest bundleRelease --console=plain
+if ($LASTEXITCODE -ne 0) { throw "Échec (code $LASTEXITCODE) : rien n'est à envoyer." }
+
 if (-not $SkipDeviceTests) {
     # Une version signée différemment (release) déjà installée empêcherait l'installation des tests.
     $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
     & $adb uninstall app.mantrailing 2>&1 | Out-Null
-    $tasks += 'connectedDebugAndroidTest'
+    $results = 'app\build\outputs\androidTest-results\connected'
+    foreach ($attempt in 1, 2) {
+        & .\gradlew.bat connectedDebugAndroidTest --console=plain
+        if ($LASTEXITCODE -ne 0) { throw "Tests d'interface en échec (code $LASTEXITCODE) : rien n'est à envoyer." }
+        # L'émulateur rate parfois le lancement juste après une installation (« failed to attach ») : on réessaie une fois.
+        $notStarted = Get-ChildItem $results -Recurse -Filter 'TEST-*.xml' | Select-String -Quiet 'Instrumentation run failed'
+        if (-not $notStarted) { break }
+        Write-Host "L'instrumentation n'a pas démarré, nouvel essai..."
+    }
 }
-$tasks += 'bundleRelease'
-
-& .\gradlew.bat @tasks --console=plain
-if ($LASTEXITCODE -ne 0) { throw "Échec (code $LASTEXITCODE) : rien n'est à envoyer." }
 
 # Gradle peut finir en succès sans avoir lancé de test : on vérifie les rapports.
 function Assert-Tests($dir, $label) {

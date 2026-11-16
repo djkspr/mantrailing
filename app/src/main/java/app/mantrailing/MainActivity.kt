@@ -2,6 +2,7 @@ package app.mantrailing
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -13,14 +14,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.mantrailing.ui.LoginScreen
-import app.mantrailing.ui.PetPickerScreen
+import app.mantrailing.ui.SettingsActions
+import app.mantrailing.ui.SettingsScreen
+import app.mantrailing.ui.TrackActions
 import app.mantrailing.ui.TrackScreen
 
 class MainActivity : ComponentActivity() {
@@ -38,20 +44,39 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun App(vm: MainViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
-    val stored = state.stored
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    // Compte de démonstration saisi dans les paramètres, ou chien choisi : retour à la carte.
+    LaunchedEffect(state.demo, state.stored?.pet) {
+        if (state.demo || state.stored?.pet != null) settingsOpen = false
+    }
+
     when {
         !state.ready -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        stored == null -> LoginScreen(state, onLogin = vm::login)
-        stored.pet == null -> PetPickerScreen(state, onPick = vm::selectPet, onRetry = vm::loadPets, onLogout = vm::logout)
+        settingsOpen -> {
+            BackHandler { settingsOpen = false }
+            SettingsScreen(
+                state,
+                SettingsActions(
+                    onBack = { settingsOpen = false },
+                    onLogin = vm::login,
+                    onPickPet = vm::selectPet,
+                    onRetryPets = vm::loadPets,
+                    onChangePet = vm::changePet,
+                    onLogout = vm::logout,
+                ),
+            )
+        }
         else -> TrackScreen(
-            state = state,
-            pet = stored.pet,
-            onRangeChange = vm::setRange,
-            onLoad = vm::loadTrack,
-            onLive = vm::setLive,
-            onChangePet = vm::changePet,
-            onLogout = vm::logout,
-            onDismissMessage = vm::dismissMessage,
+            state,
+            TrackActions(
+                onRangeChange = vm::setRange,
+                onLoad = vm::loadTrack,
+                onLive = vm::setLive,
+                onOpenSettings = { settingsOpen = true },
+                onStartDemo = vm::startDemo,
+                onExitDemo = vm::exitDemo,
+                onDismissMessage = vm::dismissMessage,
+            ),
         )
     }
 }

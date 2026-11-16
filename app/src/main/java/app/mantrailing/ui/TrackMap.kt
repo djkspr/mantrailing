@@ -23,6 +23,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.mantrailing.tractive.Position
 import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
@@ -61,6 +62,7 @@ private val STYLE_JSON = """
                        "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"] }
   },
   "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "#F2EFE9" } },
     { "id": "plan", "type": "raster", "source": "plan" },
     { "id": "photo", "type": "raster", "source": "photo", "layout": { "visibility": "none" } },
     { "id": "osm", "type": "raster", "source": "osm", "layout": { "visibility": "none" } }
@@ -101,6 +103,8 @@ fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier) {
     LaunchedEffect(mapView) {
         mapView.getMapAsync { m ->
             m.uiSettings.isRotateGesturesEnabled = false
+            // Vue de la France tant qu'aucune trace n'est affichée (le centre du style n'est pas appliqué).
+            m.cameraPosition = CameraPosition.Builder().target(LatLng(46.6, 2.4)).zoom(4.6).build()
             m.setStyle(Style.Builder().fromJson(STYLE_JSON)) { style ->
                 style.addSource(GeoJsonSource(DOG_SOURCE))
                 // Liseré blanc sous la trace : lisible sur le plan comme sur les photos aériennes.

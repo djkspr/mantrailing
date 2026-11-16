@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -33,11 +34,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.mantrailing.TimeRange
 import app.mantrailing.UiState
+import app.mantrailing.demo.DemoSession
 import app.mantrailing.track.TrackStats
-import app.mantrailing.tractive.Pet
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -48,45 +51,70 @@ import java.util.Locale
 private val DATE_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM", Locale.FRENCH)
 private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
 
+data class TrackActions(
+    val onRangeChange: (TimeRange) -> Unit = {},
+    val onLoad: () -> Unit = {},
+    val onLive: (Boolean) -> Unit = {},
+    val onOpenSettings: () -> Unit = {},
+    val onStartDemo: () -> Unit = {},
+    val onExitDemo: () -> Unit = {},
+    val onDismissMessage: () -> Unit = {},
+)
+
+/** Écran d'accueil : la carte. Sans collier connecté, propose la connexion ou la séance de démonstration. */
 @Composable
-fun TrackScreen(
-    state: UiState,
-    pet: Pet,
-    onRangeChange: (TimeRange) -> Unit,
-    onLoad: () -> Unit,
-    onLive: (Boolean) -> Unit,
-    onChangePet: () -> Unit,
-    onLogout: () -> Unit,
-    onDismissMessage: () -> Unit,
-) {
+fun TrackScreen(state: UiState, actions: TrackActions) {
     var menuOpen by remember { mutableStateOf(false) }
+    val title = when {
+        state.demo -> "${DemoSession.DOG_NAME} (démo)"
+        else -> state.stored?.pet?.name ?: "Mantrailing"
+    }
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(pet.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                OutlinedButton(onClick = { onLive(true) }, enabled = !state.busy) { Text("Activer LIVE") }
+                Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                if (state.connected && !state.demo) {
+                    OutlinedButton(onClick = { actions.onLive(true) }, enabled = !state.busy) { Text("Activer LIVE") }
+                }
                 Box {
-                    TextButton(onClick = { menuOpen = true }) { Text("⋮") }
+                    TextButton(onClick = { menuOpen = true }, modifier = Modifier.semantics { contentDescription = "Menu" }) { Text("⋮") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(text = { Text("Arrêter le LIVE") }, onClick = { menuOpen = false; onLive(false) })
-                        DropdownMenuItem(text = { Text("Changer de chien") }, onClick = { menuOpen = false; onChangePet() })
-                        DropdownMenuItem(text = { Text("Se déconnecter") }, onClick = { menuOpen = false; onLogout() })
+                        if (state.connected && !state.demo) {
+                            DropdownMenuItem(text = { Text("Arrêter le LIVE") }, onClick = { menuOpen = false; actions.onLive(false) })
+                        }
+                        if (state.demo) {
+                            DropdownMenuItem(text = { Text("Quitter la démo") }, onClick = { menuOpen = false; actions.onExitDemo() })
+                        } else {
+                            DropdownMenuItem(text = { Text("Séance de démonstration") }, onClick = { menuOpen = false; actions.onStartDemo() })
+                        }
+                        DropdownMenuItem(text = { Text("Paramètres") }, onClick = { menuOpen = false; actions.onOpenSettings() })
                     }
                 }
             }
-            RangePicker(state.range, onRangeChange)
-            Button(
-                onClick = onLoad, enabled = !state.busy && state.range.isValid,
-                modifier = Modifier.fillMaxWidth().testTag("load"),
-            ) {
-                if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Afficher la trace")
+            when {
+                state.demo -> Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium) {
+                    Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Séance de démonstration : données fictives.", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        TextButton(onClick = actions.onExitDemo) { Text("Quitter") }
+                    }
+                }
+                state.connected -> {
+                    RangePicker(state.range, actions.onRangeChange)
+                    Button(
+                        onClick = actions.onLoad, enabled = !state.busy && state.range.isValid,
+                        modifier = Modifier.fillMaxWidth().testTag("load"),
+                    ) {
+                        if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Afficher la trace")
+                    }
+                }
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             TrackMap(state.segments, Modifier.fillMaxSize())
+            if (!state.connected && !state.demo) Welcome(state, actions, Modifier.align(Alignment.Center))
             state.message?.let { msg ->
                 Surface(
-                    onClick = onDismissMessage,
+                    onClick = actions.onDismissMessage,
                     color = MaterialTheme.colorScheme.inverseSurface,
                     shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
@@ -94,6 +122,27 @@ fun TrackScreen(
             }
         }
         state.stats?.takeIf { it.pointCount > 0 }?.let { StatsPanel(it) }
+    }
+}
+
+@Composable
+private fun Welcome(state: UiState, actions: TrackActions, modifier: Modifier) {
+    Card(modifier.padding(24.dp).testTag("welcome")) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Bienvenue !", style = MaterialTheme.typography.titleLarge)
+            Text(
+                if (state.stored == null) {
+                    "Pour afficher la trace de votre chien, connectez son collier GPS Tractive."
+                } else {
+                    "Choisissez votre chien dans les paramètres."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Button(onClick = actions.onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+                Text(if (state.stored == null) "Connecter un collier Tractive" else "Paramètres")
+            }
+            OutlinedButton(onClick = actions.onStartDemo, modifier = Modifier.fillMaxWidth()) { Text("Voir une séance de démonstration") }
+        }
     }
 }
 
