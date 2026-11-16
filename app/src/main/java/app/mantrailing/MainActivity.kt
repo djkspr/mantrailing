@@ -60,7 +60,7 @@ private fun App(vm: MainViewModel = viewModel()) {
 val DogTrackColor = Color(0xFFD9480F)
 
 @Composable
-private fun MantrailingTheme(content: @Composable () -> Unit) {
+fun MantrailingTheme(content: @Composable () -> Unit) {
     val colors = if (isSystemInDarkTheme()) {
         darkColorScheme(primary = Color(0xFFFF8A50), secondary = Color(0xFF9CCC65))
     } else {

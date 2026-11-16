@@ -39,4 +39,4 @@ Mantrailing est une application indépendante, ni affiliée à Tractive, ni appr
 - Icône 512 × 512 : `icon-512.png`
 - Image de présentation 1024 × 500 : `feature-graphic-1024x500.png`
 - Sources SVG à côté ; régénérer les PNG avec `.\render.ps1`.
-- Captures d'écran (au moins 2, téléphone) : à faire depuis l'appli connectée à un vrai compte.
+- Captures d'écran 1080 × 1920 (9:16) : `screenshot-1-trace-plan-ign.png`, `screenshot-2-trace-photos-ign.png`, séance fictive en forêt de Fontainebleau. Régénérer avec `.\screenshots.ps1` (émulateur lancé).

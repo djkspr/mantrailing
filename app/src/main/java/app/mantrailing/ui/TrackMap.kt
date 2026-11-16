@@ -29,6 +29,7 @@ import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
@@ -102,6 +103,16 @@ fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier) {
             m.uiSettings.isRotateGesturesEnabled = false
             m.setStyle(Style.Builder().fromJson(STYLE_JSON)) { style ->
                 style.addSource(GeoJsonSource(DOG_SOURCE))
+                // Liseré blanc sous la trace : lisible sur le plan comme sur les photos aériennes.
+                style.addLayer(
+                    LineLayer("dog-casing", DOG_SOURCE).withProperties(
+                        PropertyFactory.lineColor("#FFFFFF"),
+                        PropertyFactory.lineOpacity(0.85f),
+                        PropertyFactory.lineWidth(7f),
+                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                    ),
+                )
                 style.addLayer(
                     LineLayer("dog-line", DOG_SOURCE).withProperties(
                         PropertyFactory.lineColor("#D9480F"),
@@ -110,12 +121,18 @@ fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier) {
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                     ),
                 )
+                // Points discrets en vue d'ensemble (en LIVE ils sont à quelques mètres les uns des autres),
+                // bien visibles quand on zoome pour examiner un passage.
                 style.addLayer(
                     CircleLayer("dog-points", DOG_SOURCE).withProperties(
-                        PropertyFactory.circleRadius(3.5f),
+                        PropertyFactory.circleRadius(
+                            Expression.interpolate(Expression.linear(), Expression.zoom(), Expression.stop(14, 0.8f), Expression.stop(19, 5f)),
+                        ),
                         PropertyFactory.circleColor("#862E00"),
                         PropertyFactory.circleStrokeColor("#FFFFFF"),
-                        PropertyFactory.circleStrokeWidth(1f),
+                        PropertyFactory.circleStrokeWidth(
+                            Expression.interpolate(Expression.linear(), Expression.zoom(), Expression.stop(16, 0f), Expression.stop(18, 1.5f)),
+                        ),
                     ),
                 )
                 map = m to style
