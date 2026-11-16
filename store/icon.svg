@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Icône Play Store : carré plein, Google applique lui-même l'arrondi. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F0661E"/>
+      <stop offset="1" stop-color="#B83C0B"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- piste suivie -->
+  <path d="M70 470 C 120 400, 60 340, 140 300 S 200 330, 215 330" fill="none" stroke="#FFFFFF" stroke-opacity=".55"
+        stroke-width="14" stroke-linecap="round" stroke-dasharray="1 30"/>
+  <!-- patte (mêmes tracés que l'icône de l'appli, viewport 108) -->
+  <g transform="translate(270 228) scale(4.3) translate(-54 -55)" fill="#FFFFFF">
+    <path d="M54,52c-9,0 -17,9 -17,16c0,6 5,9 10,8c3,-0.5 5,-1.5 7,-1.5s4,1 7,1.5c5,1 10,-2 10,-8c0,-7 -8,-16 -17,-16z"/>
+    <ellipse cx="37" cy="48" rx="5.5" ry="7"/>
+    <ellipse cx="47" cy="38" rx="5.5" ry="7"/>
+    <ellipse cx="61" cy="38" rx="5.5" ry="7"/>
+    <ellipse cx="71" cy="48" rx="5.5" ry="7"/>
+  </g>
+</svg>
