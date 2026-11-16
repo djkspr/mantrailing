@@ -1,7 +1,13 @@
-# Prépare un envoi Play Store : tests unitaires + tests d'interface, puis AAB signé.
-# Usage : .\release.ps1            (un émulateur ou un téléphone doit être branché pour les tests d'interface)
+# Publie une version sur Google Play : tests unitaires + tests d'interface, AAB signé, puis envoi sur la piste de test.
+# Usage : .\release.ps1                     (un émulateur ou un téléphone doit être branché pour les tests d'interface)
 #         .\release.ps1 -SkipDeviceTests
-param([switch]$SkipDeviceTests)
+#         .\release.ps1 -Track alpha        (piste Play : internal [défaut], alpha = test fermé, beta, production)
+#         .\release.ps1 -NoUpload           (prépare l'AAB sans l'envoyer)
+param(
+    [switch]$SkipDeviceTests,
+    [switch]$NoUpload,
+    [string]$Track = 'internal'
+)
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
@@ -13,6 +19,15 @@ if (-not (Test-Path keystore.properties)) {
 if (git status --porcelain) {
     throw 'Des modifications ne sont pas commitées : le versionCode (nombre de commits) ne serait pas unique.'
 }
+
+# Clé du compte de service Google Play (voir README) : vérifiée avant les tests pour ne pas les lancer pour rien.
+$playKey = "$env:USERPROFILE\.android-keys\mantrailing-play-api.json"
+if (-not $NoUpload -and -not (Test-Path $playKey)) {
+    throw "Clé d'API Google Play absente ($playKey) : voir README, ou relancer avec -NoUpload."
+}
+
+node --test 'tools/*.test.mjs'
+if ($LASTEXITCODE -ne 0) { throw "Tests des outils en échec : rien n'est à envoyer." }
 
 & .\gradlew.bat clean testDebugUnitTest bundleRelease --console=plain
 if ($LASTEXITCODE -ne 0) { throw "Échec (code $LASTEXITCODE) : rien n'est à envoyer." }
@@ -46,11 +61,23 @@ function Assert-Tests($dir, $label) {
 Assert-Tests 'app\build\test-results\testDebugUnitTest' 'Tests unitaires'
 if (-not $SkipDeviceTests) { Assert-Tests 'app\build\outputs\androidTest-results\connected' "Tests d'interface" }
 
-$aab = 'app\build\outputs\bundle\release\app-release.aab'
 $version = git rev-list --count HEAD
 $out = "release\mantrailing-v$version.aab"
 New-Item -ItemType Directory -Force release | Out-Null
-Copy-Item $aab $out -Force
+Copy-Item 'app\build\outputs\bundle\release\app-release.aab' $out -Force
+
+if ($NoUpload) {
+    Write-Host "`nPrêt : $out (versionCode $version), non envoyé."
+    return
+}
+
+# Notes de version : titres des commits depuis le dernier envoi.
+$previous = git describe --tags --match 'play-v*' --abbrev=0 2>$null
+$range = if ($previous) { "$previous..HEAD" } else { 'HEAD' }
+$notes = (git log $range --no-merges --format='- %s' -n 15) -join "`n"
+
+node tools/play-publish.mjs --aab $out --key $playKey --track $Track --notes $notes
+if ($LASTEXITCODE -ne 0) { throw "Envoi sur Google Play en échec : l'AAB reste disponible dans $out." }
+
 git tag -f "play-v$version" | Out-Null
-Write-Host "`nPrêt : $out (versionCode $version, tag play-v$version)"
-Write-Host 'À envoyer dans Play Console > Tester et publier > Tests internes > Créer une release.'
+Write-Host "`nPublié : versionCode $version sur la piste « $Track » (tag play-v$version)."

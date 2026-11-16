@@ -34,11 +34,23 @@ il faut demander à Google de la réinitialiser. Pour construire, copier ce `.pr
 sous le nom `keystore.properties` (non versionné).
 
 ```powershell
-.\release.ps1            # tests unitaires + tests d'interface (émulateur lancé) puis AAB signé
+.\release.ps1               # tests (émulateur lancé), AAB signé, envoi sur la piste de test interne
+.\release.ps1 -Track alpha  # autre piste : alpha (test fermé), beta, production
+.\release.ps1 -NoUpload     # AAB seulement, dans release\
 ```
 
-Le fichier `release\mantrailing-v<N>.aab` est à envoyer dans Play Console. Le versionCode est le nombre de
-commits : il faut donc commiter entre deux envois. Un tag `play-v<N>` marque la version envoyée.
+Le versionCode est le nombre de commits : il faut donc commiter entre deux envois. Les notes de version sont
+les titres des commits depuis le dernier envoi ; un tag `play-v<N>` marque chaque version envoyée.
+
+**Envoi automatique** (`tools/play-publish.mjs`, API Google Play Android Publisher) : il faut une clé de compte
+de service dans `%USERPROFILE%\.android-keys\mantrailing-play-api.json` (non versionnée, à sauvegarder) :
+1. Google Cloud Console : créer un projet, activer « Google Play Android Developer API » ;
+2. IAM > Comptes de service : créer un compte, puis Clés > Ajouter une clé > JSON ;
+3. Play Console > Utilisateurs et autorisations : inviter l'email du compte de service, avec les droits
+   « Publier en tests » (ou « Gérer les versions ») pour l'appli Mantrailing.
+
+Tant que l'appli n'a jamais été publiée sur Google Play, l'API ne crée que des releases « brouillon » : le script
+le détecte, il reste alors à cliquer « Examiner la release » dans la Play Console.
 
 Politique de confidentialité : https://djkspr.github.io/mantrailing-site/politique-confidentialite.html
 (source : dépôt public `mantrailing-site`, dans `..\mantrailing-site`). La mettre à jour à chaque nouvelle donnée
