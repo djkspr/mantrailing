@@ -43,7 +43,9 @@ Le versionCode est le nombre de commits : il faut donc commiter entre deux envoi
 les titres des commits depuis le dernier envoi ; un tag `play-v<N>` marque chaque version envoyée.
 
 **Envoi automatique** (`tools/play-publish.mjs`, API Google Play Android Publisher) : il faut une clé de compte
-de service dans `%USERPROFILE%\.android-keys\mantrailing-play-api.json` (non versionnée, à sauvegarder) :
+de service, dont le chemin est donné par `playApiKey=` dans `keystore.properties` (par défaut
+`%USERPROFILE%\.android-keys\mantrailing-play-api.json`). La clé du back-office des Brasseurs est réutilisée ;
+pour en créer une nouvelle :
 1. Google Cloud Console : créer un projet, activer « Google Play Android Developer API » ;
 2. IAM > Comptes de service : créer un compte, puis Clés > Ajouter une clé > JSON ;
 3. Play Console > Utilisateurs et autorisations : inviter l'email du compte de service, avec les droits

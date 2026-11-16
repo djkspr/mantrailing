@@ -20,8 +20,10 @@ if (git status --porcelain) {
     throw 'Des modifications ne sont pas commitées : le versionCode (nombre de commits) ne serait pas unique.'
 }
 
-# Clé du compte de service Google Play (voir README) : vérifiée avant les tests pour ne pas les lancer pour rien.
-$playKey = "$env:USERPROFILE\.android-keys\mantrailing-play-api.json"
+# Clé du compte de service Google Play (voir README) : chemin « playApiKey » de keystore.properties, sinon
+# emplacement par défaut. Vérifiée avant les tests pour ne pas les lancer pour rien.
+$playKey = (Get-Content keystore.properties | Where-Object { $_ -match '^\s*playApiKey\s*=' } | Select-Object -First 1) -replace '^\s*playApiKey\s*=\s*', ''
+if (-not $playKey) { $playKey = "$env:USERPROFILE\.android-keys\mantrailing-play-api.json" }
 if (-not $NoUpload -and -not (Test-Path $playKey)) {
     throw "Clé d'API Google Play absente ($playKey) : voir README, ou relancer avec -NoUpload."
 }
