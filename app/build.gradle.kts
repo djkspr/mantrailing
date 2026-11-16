@@ -1,8 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// Clé d'envoi Play Store : keystore.properties (non versionné) à la racine, voir README.
+val keystoreProps = rootProject.file("keystore.properties").takeIf { it.exists() }
+    ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
+
+// Chaque envoi au Play Store exige un versionCode plus grand : on prend le nombre de commits.
+val commitCount = providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
+    .standardOutput.asText.map { it.trim().toInt() }
 
 android {
     namespace = "app.mantrailing"
@@ -12,14 +22,26 @@ android {
         applicationId = "app.mantrailing"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        versionCode = commitCount.getOrElse(1)
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        if (keystoreProps != null) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

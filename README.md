@@ -26,6 +26,22 @@ Ouvrir le dossier dans Android Studio, ou en ligne de commande (JDK d'Android St
 ./gradlew installDebug               # installer sur le téléphone
 ```
 
+### Publier sur le Play Store (tests internes)
+
+Signature : clé d'envoi `%USERPROFILE%\.android-keys\mantrailing-upload.jks`, ses mots de passe dans
+`mantrailing-keystore.properties` à côté. **À sauvegarder** (gestionnaire de mots de passe, clé USB) : sans elle,
+il faut demander à Google de la réinitialiser. Pour construire, copier ce `.properties` à la racine du projet
+sous le nom `keystore.properties` (non versionné).
+
+```powershell
+.\release.ps1            # tests unitaires + tests d'interface (émulateur lancé) puis AAB signé
+```
+
+Le fichier `release\mantrailing-v<N>.aab` est à envoyer dans Play Console. Le versionCode est le nombre de
+commits : il faut donc commiter entre deux envois. Un tag `play-v<N>` marque la version envoyée.
+
+Politique de confidentialité à publier en ligne : [docs/politique-confidentialite.md](docs/politique-confidentialite.md).
+
 ## API Tractive
 
 Tractive n'a pas d'API publique : on utilise celle de leur appli (non officielle, référence : la bibliothèque
