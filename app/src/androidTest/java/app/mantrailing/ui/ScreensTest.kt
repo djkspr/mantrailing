@@ -16,7 +16,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.mantrailing.TimeRange
 import app.mantrailing.UiState
-import app.mantrailing.data.StoredSession
+import app.mantrailing.session.Dog
 import app.mantrailing.demo.DemoSession
 import app.mantrailing.session.ActiveRecording
 import app.mantrailing.session.DEFAULT_QUICK_NOTES
@@ -27,7 +27,6 @@ import app.mantrailing.session.RecordingKind
 import app.mantrailing.session.TrackSource
 import app.mantrailing.session.TrailSession
 import app.mantrailing.track.TrackStats
-import app.mantrailing.tractive.Pet
 import app.mantrailing.tractive.Position
 import app.mantrailing.tractive.Session
 import org.junit.Assert.assertEquals
@@ -44,9 +43,10 @@ class ScreensTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val pet = Pet("p1", "Rex", "TRK1")
+    private val rex = Dog("d1", "Rex", "p1", "TRK1")
+    private val nala = Dog("d2", "Nala")
     private val session = Session("u1", "tok", 0)
-    private val connected = UiState(ready = true, stored = StoredSession(session, pet))
+    private val connected = UiState(ready = true, tractive = session, dogs = listOf(rex, nala), activeDogId = rex.id)
 
     // --- Accueil sans compte (ce que voit l'examinateur Google Play) ---
 
@@ -61,7 +61,7 @@ class ScreensTest {
         rule.onNodeWithText("Mantrailing").assertIsDisplayed()
         rule.onNodeWithText("Activer LIVE").assertDoesNotExist()
         rule.onNodeWithTag("load").assertDoesNotExist()
-        rule.onNodeWithText("Connecter un collier Tractive").performClick()
+        rule.onNodeWithText("Ajouter mes chiens").performClick()
         rule.onNodeWithText("Voir une séance de démonstration").performClick()
 
         assertEquals(1, settings)
@@ -289,7 +289,7 @@ class ScreensTest {
         val other = laidTrail.copy(id = "autre", startedAt = 1_794_820_000, endedAt = 1_794_820_300)
         rule.setContent {
             MaterialTheme {
-                SessionsScreen(listOf(searched), listOf(laidTrail, other), SessionsActions(onOpenTrail = { opened = it }, onDeleteTrail = { deleted += it.id }))
+                SessionsScreen(listOf(searched), listOf(laidTrail, other), emptyList(), SessionsActions(onOpenTrail = { opened = it }, onDeleteTrail = { deleted += it.id }))
             }
         }
 
@@ -319,7 +319,7 @@ class ScreensTest {
         val state = connected.copy(segments = segments, stats = TrackStats.of(segments), loadedOnce = true)
         rule.setContent { MaterialTheme { TrackScreen(state, TrackActions()) } }
 
-        rule.onNodeWithText("Rex").assertIsDisplayed()
+        rule.onNodeWithText("Rex ▾").assertIsDisplayed()
         rule.onNodeWithTag("welcome").assertDoesNotExist()
         rule.onNodeWithText("7 min 30s").assertIsDisplayed() // durée
         rule.onNodeWithText("5 min").assertIsDisplayed() // intervalle médian
@@ -396,7 +396,7 @@ class ScreensTest {
         val state = UiState(ready = true, recording = recording, recordingPoints = 42)
         rule.setContent { MaterialTheme { TrackScreen(state, TrackActions(onStopRecording = { stops += it })) } }
 
-        rule.onNodeWithText("Recherche en cours", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Recherche de Rex", substring = true).assertIsDisplayed()
         rule.onNodeWithText("Sans piste enregistrée").assertIsDisplayed()
         rule.onNodeWithText("GPS du téléphone · 42 positions").assertIsDisplayed()
         rule.onNodeWithTag("record").assertDoesNotExist()
@@ -493,7 +493,7 @@ class ScreensTest {
     @Test
     fun mes_pistes_liste_et_ouverture() {
         var opened: TrailSession? = null
-        rule.setContent { MaterialTheme { SessionsScreen(savedSessions, emptyList(), SessionsActions(onOpen = { opened = it })) } }
+        rule.setContent { MaterialTheme { SessionsScreen(savedSessions, emptyList(), emptyList(), SessionsActions(onOpen = { opened = it })) } }
 
         rule.onNodeWithText("Trace pas encore récupérée · 15 min").assertIsDisplayed()
         rule.onNodeWithText("0,11 km · 10 min").assertIsDisplayed()
@@ -505,7 +505,7 @@ class ScreensTest {
     @Test
     fun mes_pistes_suppression_avec_confirmation() {
         val deleted = mutableListOf<String>()
-        rule.setContent { MaterialTheme { SessionsScreen(savedSessions, emptyList(), SessionsActions(onDelete = { deleted += it.id })) } }
+        rule.setContent { MaterialTheme { SessionsScreen(savedSessions, emptyList(), emptyList(), SessionsActions(onDelete = { deleted += it.id })) } }
 
         rule.onAllNodesWithText("Supprimer")[1].performClick()
         rule.onNodeWithText("Annuler").performClick()
@@ -518,7 +518,7 @@ class ScreensTest {
 
     @Test
     fun mes_pistes_vide() {
-        rule.setContent { MaterialTheme { SessionsScreen(emptyList(), emptyList(), SessionsActions()) } }
+        rule.setContent { MaterialTheme { SessionsScreen(emptyList(), emptyList(), emptyList(), SessionsActions()) } }
         rule.onNodeWithText("Rien d'enregistré", substring = true).assertIsDisplayed()
     }
 
@@ -529,9 +529,9 @@ class ScreensTest {
         val chosen = mutableListOf<TrackSource>()
         rule.setContent { MaterialTheme { SettingsScreen(connected, SettingsActions(onTrackSource = { chosen += it })) } }
 
-        rule.onNodeWithText("Trace du chien").assertIsDisplayed()
-        rule.onNodeWithText("GPS du téléphone").performClick()
-        rule.onNodeWithText("Collier Tractive").performClick()
+        rule.onNodeWithText("Trace du chien").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("GPS du téléphone").performScrollTo().performClick()
+        rule.onNodeWithText("Collier Tractive").performScrollTo().performClick()
 
         assertEquals(listOf(TrackSource.PHONE, TrackSource.TRACTIVE), chosen)
     }
@@ -541,8 +541,8 @@ class ScreensTest {
         val chosen = mutableListOf<TrackSource>()
         rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onTrackSource = { chosen += it })) } }
 
-        rule.onNodeWithText("Connecte d'abord un collier ci-dessus.").assertIsDisplayed()
-        rule.onNodeWithText("Collier Tractive").performClick()
+        rule.onNodeWithText("Connecte d'abord un compte Tractive ci-dessus.").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Collier Tractive").performScrollTo().performClick()
 
         assertTrue(chosen.isEmpty())
     }
@@ -572,25 +572,120 @@ class ScreensTest {
         rule.onNodeWithText("Email ou mot de passe incorrect.").assertIsDisplayed()
     }
 
+    // --- Chiens ---
+
     @Test
-    fun parametres_choix_du_chien() {
-        var picked: Pet? = null
-        val state = UiState(ready = true, stored = StoredSession(session, null), pets = listOf(pet, Pet("p2", "Mirza", null)))
-        rule.setContent { MaterialTheme { SettingsScreen(state, SettingsActions(onPickPet = { picked = it })) } }
+    fun parametres_liste_des_chiens_et_choix_du_chien_qui_cherche() {
+        val selected = mutableListOf<Dog>()
+        rule.setContent { MaterialTheme { SettingsScreen(connected, SettingsActions(onSelectDog = { selected += it })) } }
 
-        rule.onNodeWithText("Pas de collier associé").assertIsDisplayed()
+        rule.onNodeWithText("Mes chiens").assertIsDisplayed()
+        rule.onNodeWithText("Porte un collier Tractive").assertIsDisplayed()
+        rule.onNodeWithText("Sans collier : trace au GPS du téléphone").assertIsDisplayed()
+        rule.onNodeWithText("Nala").performClick()
+
+        assertEquals(listOf(nala), selected)
+    }
+
+    @Test
+    fun parametres_ajouter_renommer_retirer_un_chien() {
+        val added = mutableListOf<String>()
+        val renamed = mutableListOf<Pair<Dog, String>>()
+        val deleted = mutableListOf<Dog>()
+        rule.setContent {
+            MaterialTheme {
+                SettingsScreen(
+                    connected,
+                    SettingsActions(onAddDog = { added += it }, onRenameDog = { d, n -> renamed += d to n }, onDeleteDog = { deleted += it }),
+                )
+            }
+        }
+
+        rule.onNodeWithTag("add-dog").performClick()
+        rule.onNodeWithText("Ajouter").assertIsNotEnabled()
+        rule.onNodeWithTag("dog-name").performTextInput("Gaïa")
+        rule.onNodeWithText("Ajouter").performClick()
+
+        rule.onAllNodesWithText("Renommer")[1].performClick()
+        rule.onNodeWithTag("dog-name").performTextInput(" la belle")
+        rule.onNodeWithText("Enregistrer").performClick()
+
+        // Retirer demande confirmation ; un chien Tractive ne sera pas réimporté.
+        rule.onAllNodesWithText("Retirer")[0].performClick()
+        rule.onNodeWithText("Il ne sera pas réimporté", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Annuler").performClick()
+        rule.onAllNodesWithText("Retirer")[1].performClick()
+        rule.onNodeWithText("Retirer Nala ?").assertIsDisplayed()
+        rule.onAllNodesWithText("Retirer").assertCountEquals(3)[2].performClick()
+
+        assertEquals(listOf("Gaïa"), added)
+        assertEquals(listOf(nala to "Nala la belle"), renamed)
+        assertEquals(listOf(nala), deleted)
+    }
+
+    @Test
+    fun accueil_choix_du_chien_qui_cherche() {
+        val selected = mutableListOf<Dog>()
+        var settings = 0
+        rule.setContent {
+            MaterialTheme { TrackScreen(connected, TrackActions(onSelectDog = { selected += it }, onOpenSettings = { settings++ })) }
+        }
+
+        rule.onNodeWithTag("welcome").assertDoesNotExist()
+        rule.onNodeWithText("Rex ▾").performClick()
+        rule.onNodeWithText("Nala").performClick()
+        rule.onNodeWithText("Rex ▾").performClick()
+        rule.onNodeWithText("Gérer les chiens…").performClick()
+
+        assertEquals(listOf(nala), selected)
+        assertEquals(1, settings)
+    }
+
+    @Test
+    fun accueil_chien_sans_collier_pas_de_live() {
+        rule.setContent { MaterialTheme { TrackScreen(connected.copy(activeDogId = nala.id), TrackActions()) } }
+
+        rule.onNodeWithText("Nala ▾").assertIsDisplayed()
+        rule.onNodeWithText("Activer LIVE").assertDoesNotExist()
+    }
+
+    @Test
+    fun mes_pistes_filtre_par_chien() {
+        val sessions = listOf(
+            TrailSession("s1", "Rex", TrackSource.PHONE, 1_794_900_000, 1_794_900_600, dogId = rex.id),
+            TrailSession("s2", "Nala", TrackSource.PHONE, 1_794_800_000, 1_794_800_600, dogId = nala.id),
+            TrailSession("s3", "Rex", TrackSource.PHONE, 1_794_700_000, 1_794_700_600), // d'avant les chiens multiples
+        )
+        rule.setContent { MaterialTheme { SessionsScreen(sessions, emptyList(), listOf(rex, nala), SessionsActions()) } }
+
+        rule.onNodeWithTag("session-s2").assertIsDisplayed()
         rule.onNodeWithText("Rex").performClick()
+        rule.onNodeWithTag("session-s1").assertIsDisplayed()
+        rule.onNodeWithTag("session-s3").assertIsDisplayed()
+        rule.onNodeWithTag("session-s2").assertDoesNotExist()
+        rule.onNodeWithText("Tous les chiens").performClick()
+        rule.onNodeWithTag("session-s2").assertIsDisplayed()
+    }
 
-        assertEquals(pet, picked)
+    @Test
+    fun mes_pistes_un_seul_chien_sans_filtre() {
+        rule.setContent { MaterialTheme { SessionsScreen(savedSessions, emptyList(), listOf(rex), SessionsActions()) } }
+        rule.onNodeWithTag("dog-filter").assertDoesNotExist()
     }
 
     @Test
     fun parametres_connecte_deconnexion_et_retour() {
         var logout = 0
         var back = 0
-        rule.setContent { MaterialTheme { SettingsScreen(connected, SettingsActions(onLogout = { logout++ }, onBack = { back++ })) } }
+        var syncs = 0
+        rule.setContent {
+            MaterialTheme { SettingsScreen(connected, SettingsActions(onLogout = { logout++ }, onBack = { back++ }, onSyncDogs = { syncs++ })) }
+        }
 
-        rule.onNodeWithText("Connecté : Rex").assertIsDisplayed()
+        rule.onNodeWithText("Compte Tractive connecté").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Avec collier : Rex").assertIsDisplayed()
+        rule.onNodeWithText("Actualiser les chiens").performClick()
+        assertEquals(1, syncs)
         rule.onNodeWithText("Se déconnecter").performClick()
         rule.onNodeWithContentDescription("Retour").performClick()
 

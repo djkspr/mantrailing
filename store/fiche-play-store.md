@@ -27,6 +27,7 @@ DEUX FAÇONS D'ENREGISTRER LA TRACE DU CHIEN
 
 FONCTIONNALITÉS
 • Mes pistes : pistes posées et recherches, enregistrées sur le téléphone, à revoir sur la carte
+• Plusieurs chiens : chacun ses recherches, avec ou sans collier ; les chiens du compte Tractive sont ajoutés d'office
 • Fonds de carte IGN (plan et photos aériennes) et OpenStreetMap
 • Distance, durée, fréquence et précision des positions
 • Trace du collier sur une période libre, pour une sortie qui n'a pas été enregistrée

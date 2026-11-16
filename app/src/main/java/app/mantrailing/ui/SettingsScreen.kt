@@ -43,16 +43,19 @@ import androidx.compose.ui.semantics.Role
 import app.mantrailing.UiState
 import app.mantrailing.session.NoteType
 import app.mantrailing.session.TrackSource
-import app.mantrailing.tractive.Pet
+import app.mantrailing.session.Dog
 
 const val PRIVACY_POLICY_URL = "https://djkspr.github.io/mantrailing-site/politique-confidentialite.html"
 
 data class SettingsActions(
     val onBack: () -> Unit = {},
     val onLogin: (String, String) -> Unit = { _, _ -> },
-    val onPickPet: (Pet) -> Unit = {},
-    val onRetryPets: () -> Unit = {},
-    val onChangePet: () -> Unit = {},
+    /** Réimporte les chiens du compte Tractive. */
+    val onSyncDogs: () -> Unit = {},
+    val onAddDog: (String) -> Unit = {},
+    val onRenameDog: (Dog, String) -> Unit = { _, _ -> },
+    val onDeleteDog: (Dog) -> Unit = {},
+    val onSelectDog: (Dog) -> Unit = {},
     val onLogout: () -> Unit = {},
     val onTrackSource: (TrackSource) -> Unit = {},
     val onQuickNotes: (List<NoteType>) -> Unit = {},
@@ -60,7 +63,6 @@ data class SettingsActions(
 
 @Composable
 fun SettingsScreen(state: UiState, actions: SettingsActions) {
-    val stored = state.stored
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -70,18 +72,27 @@ fun SettingsScreen(state: UiState, actions: SettingsActions) {
             Text("Paramètres", style = MaterialTheme.typography.headlineSmall)
         }
 
+        DogsSetting(state.dogs, state.activeDogId, actions.onSelectDog, actions.onAddDog, actions.onRenameDog, actions.onDeleteDog)
+
+        HorizontalDivider()
         Text("Collier GPS Tractive", style = MaterialTheme.typography.titleMedium)
-        when {
-            stored == null -> LoginForm(state, actions.onLogin)
-            stored.pet == null -> PetPicker(state, actions)
-            else -> Card(Modifier.fillMaxWidth()) {
+        if (state.tractive == null) {
+            LoginForm(state, actions.onLogin)
+        } else {
+            val collars = state.dogs.filter { it.hasCollar }
+            Card(Modifier.fillMaxWidth().testTag("tractive-account")) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Connecté : ${stored.pet.name}", style = MaterialTheme.typography.titleMedium)
-                    Text(stored.pet.trackerId?.let { "Collier $it" } ?: "Pas de collier associé", style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = actions.onChangePet) { Text("Changer de chien") }
+                    Text("Compte Tractive connecté", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (collars.isEmpty()) "Aucun chien avec collier." else "Avec collier : ${collars.joinToString { it.name }}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = actions.onSyncDogs, enabled = !state.busy) { Text("Actualiser les chiens") }
                         TextButton(onClick = actions.onLogout) { Text("Se déconnecter") }
                     }
+                    if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
             }
         }
@@ -105,19 +116,20 @@ fun SettingsScreen(state: UiState, actions: SettingsActions) {
 
 @Composable
 private fun TrackSourceSetting(state: UiState, onSelect: (TrackSource) -> Unit) {
-    // Sans choix enregistré : le collier s'il est connecté, sinon le téléphone (comme au démarrage d'une piste).
+    // Sans choix enregistré : le collier s'il y en a un, sinon le téléphone (comme au démarrage d'une recherche).
+    val collars = state.tractive != null && state.dogs.any { it.hasCollar }
     val selected = when {
-        !state.connected -> TrackSource.PHONE
+        !collars -> TrackSource.PHONE
         else -> state.trackSource ?: TrackSource.TRACTIVE
     }
     Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Trace du chien", style = MaterialTheme.typography.titleMedium)
-        Text("Source utilisée pour enregistrer les pistes.", style = MaterialTheme.typography.bodySmall)
+        Text("Source utilisée pour enregistrer les recherches. Un chien sans collier est toujours suivi au téléphone.", style = MaterialTheme.typography.bodySmall)
         SourceOption(
             label = "Collier Tractive",
-            detail = if (state.connected) "Le mode LIVE est activé automatiquement pendant la piste." else "Connecte d'abord un collier ci-dessus.",
+            detail = if (collars) "Le mode LIVE est activé automatiquement pendant la recherche." else "Connecte d'abord un compte Tractive ci-dessus.",
             selected = selected == TrackSource.TRACTIVE,
-            enabled = state.connected,
+            enabled = collars,
             onClick = { onSelect(TrackSource.TRACTIVE) },
         )
         SourceOption(
@@ -176,27 +188,3 @@ private fun LoginForm(state: UiState, onLogin: (String, String) -> Unit) {
     }
 }
 
-@Composable
-private fun PetPicker(state: UiState, actions: SettingsActions) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Quel chien ?", style = MaterialTheme.typography.bodyLarge)
-        when {
-            state.busy -> CircularProgressIndicator()
-            state.pets.isEmpty() -> {
-                Text(state.message ?: "Aucun animal trouvé sur ce compte Tractive.")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = actions.onRetryPets) { Text("Réessayer") }
-                    TextButton(onClick = actions.onLogout) { Text("Se déconnecter") }
-                }
-            }
-            else -> state.pets.forEach { pet ->
-                Card(onClick = { actions.onPickPet(pet) }, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(pet.name, style = MaterialTheme.typography.titleMedium)
-                        Text(pet.trackerId?.let { "Collier $it" } ?: "Pas de collier associé", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-        }
-    }
-}

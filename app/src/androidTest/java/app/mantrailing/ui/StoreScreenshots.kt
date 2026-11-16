@@ -13,12 +13,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.mantrailing.MantrailingTheme
 import app.mantrailing.UiState
-import app.mantrailing.data.StoredSession
+import app.mantrailing.session.Dog
 import app.mantrailing.demo.DemoSession
 import app.mantrailing.session.TrackSource
 import app.mantrailing.session.TrailSession
 import app.mantrailing.track.TrackStats
-import app.mantrailing.tractive.Pet
 import app.mantrailing.tractive.Session
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -48,7 +47,9 @@ class StoreScreenshots {
         )
         val state = UiState(
             ready = true,
-            stored = StoredSession(Session("demo", "demo", 0), Pet("demo", DemoSession.DOG_NAME, "DEMO")),
+            tractive = Session("demo", "demo", 0),
+            dogs = listOf(Dog("demo", DemoSession.DOG_NAME, "demo", "DEMO")),
+            activeDogId = "demo",
             openedSession = session,
             segments = segments,
             stats = TrackStats.of(segments),

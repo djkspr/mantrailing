@@ -25,6 +25,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.FilterChip
+import androidx.compose.runtime.saveable.rememberSaveable
+import app.mantrailing.session.Dog
+import app.mantrailing.session.sessionsOf
 import app.mantrailing.session.LaidTrail
 import app.mantrailing.session.TrailSession
 import app.mantrailing.track.TrackStats
@@ -44,9 +50,13 @@ private data class PendingDelete(val label: String, val confirm: () -> Unit)
 
 /** « Mes pistes » : les pistes posées par le traceur et les recherches du chien, les plus récentes d'abord. */
 @Composable
-fun SessionsScreen(sessions: List<TrailSession>, trails: List<LaidTrail>, actions: SessionsActions) {
+fun SessionsScreen(allSessions: List<TrailSession>, trails: List<LaidTrail>, dogs: List<Dog>, actions: SessionsActions) {
     var toDelete by remember { mutableStateOf<PendingDelete?>(null) }
-    val searched = remember(sessions) { sessions.mapNotNull { it.trailId }.toSet() }
+    val searched = remember(allSessions) { allSessions.mapNotNull { it.trailId }.toSet() }
+    // Filtre des recherches par chien (null : tous). Les pistes posées servent à tous les chiens.
+    var dogFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    val filterDog = dogs.find { it.id == dogFilter }
+    val sessions = remember(allSessions, filterDog) { filterDog?.let { sessionsOf(allSessions, it) } ?: allSessions }
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = actions.onBack, modifier = Modifier.semantics { contentDescription = "Retour" }) {
@@ -54,7 +64,18 @@ fun SessionsScreen(sessions: List<TrailSession>, trails: List<LaidTrail>, action
             }
             Text("Mes pistes", style = MaterialTheme.typography.headlineSmall)
         }
-        if (sessions.isEmpty() && trails.isEmpty()) {
+        if (dogs.size > 1) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).testTag("dog-filter"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = filterDog == null, onClick = { dogFilter = null }, label = { Text("Tous les chiens") })
+                dogs.forEach { dog ->
+                    FilterChip(selected = filterDog?.id == dog.id, onClick = { dogFilter = dog.id }, label = { Text(dog.name) })
+                }
+            }
+        }
+        if (filterDog != null && sessions.isEmpty()) {
+            Text("Pas encore de recherche pour ${filterDog.name}.", style = MaterialTheme.typography.bodyMedium)
+        }
+        if (allSessions.isEmpty() && trails.isEmpty()) {
             Text(
                 "Rien d'enregistré pour l'instant. Sur l'accueil, le traceur commence par « Poser une piste » ; " +
                     "au départ du chien, « Démarrer une recherche ».",

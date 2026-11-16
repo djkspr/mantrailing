@@ -71,9 +71,9 @@ private fun App(vm: MainViewModel = viewModel()) {
     var rememberPendingChoice by remember { mutableStateOf(false) }
     var pendingTrailId by remember { mutableStateOf<String?>(null) }
 
-    // Compte de démonstration saisi dans les paramètres, ou chien choisi : retour à la carte.
-    LaunchedEffect(state.demo, state.stored?.pet) {
-        if (screen == Screen.SETTINGS && (state.demo || state.stored?.pet != null)) screen = Screen.HOME
+    // Compte de démonstration saisi dans les paramètres : retour à la carte.
+    LaunchedEffect(state.demo) {
+        if (screen == Screen.SETTINGS && state.demo) screen = Screen.HOME
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
@@ -132,9 +132,11 @@ private fun App(vm: MainViewModel = viewModel()) {
                 SettingsActions(
                     onBack = { screen = Screen.HOME },
                     onLogin = vm::login,
-                    onPickPet = vm::selectPet,
-                    onRetryPets = vm::loadPets,
-                    onChangePet = vm::changePet,
+                    onSyncDogs = vm::syncTractiveDogs,
+                    onAddDog = vm::addDog,
+                    onRenameDog = vm::renameDog,
+                    onDeleteDog = vm::deleteDog,
+                    onSelectDog = vm::selectDog,
                     onLogout = vm::logout,
                     onTrackSource = vm::setTrackSource,
                     onQuickNotes = vm::setQuickNotes,
@@ -146,6 +148,7 @@ private fun App(vm: MainViewModel = viewModel()) {
             SessionsScreen(
                 state.sessions,
                 state.trails,
+                state.dogs,
                 SessionsActions(
                     onBack = { screen = Screen.HOME },
                     onOpen = { vm.openSession(it); screen = Screen.HOME },
@@ -162,6 +165,7 @@ private fun App(vm: MainViewModel = viewModel()) {
                 onLoad = vm::loadTrack,
                 onLive = vm::setLive,
                 onOpenSettings = { screen = Screen.SETTINGS },
+                onSelectDog = vm::selectDog,
                 onStartDemo = vm::startDemo,
                 onExitDemo = vm::exitDemo,
                 onDismissMessage = vm::dismissMessage,

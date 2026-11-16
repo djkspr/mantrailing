@@ -22,6 +22,8 @@ data class ActiveRecording(
     val kind: RecordingKind = RecordingKind.SEARCH,
     /** Recherche : piste posée que le chien doit suivre. */
     val trailId: String? = null,
+    /** Chien qui cherche (null : aucun chien enregistré dans l'appli). */
+    val dogId: String? = null,
 )
 
 /** Piste posée par le traceur : le parcours que le chien devra suivre. Horodatages en secondes Unix. */
@@ -49,6 +51,8 @@ data class TrailSession(
     val trailEndedAt: Long? = null,
     /** Notes posées pendant la recherche. */
     val notes: List<SearchNote> = emptyList(),
+    /** Chien qui a cherché ; absent des recherches d'avant les chiens multiples (reconnues à [dogName]). */
+    val dogId: String? = null,
 ) {
     /** Âge de la piste au départ du chien, en secondes. */
     val trailAgeSeconds: Long? get() = trailEndedAt?.let { (startedAt - it).coerceAtLeast(0) }

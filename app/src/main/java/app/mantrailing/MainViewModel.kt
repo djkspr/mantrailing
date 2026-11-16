@@ -4,8 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.mantrailing.data.SessionStore
-import app.mantrailing.data.StoredSession
 import app.mantrailing.demo.DemoSession
+import app.mantrailing.session.Dog
+import app.mantrailing.session.mergeTractivePets
+import app.mantrailing.tractive.Session
 import app.mantrailing.recording.PhoneRecordingService
 import app.mantrailing.session.ActiveRecording
 import app.mantrailing.session.LaidTrail
@@ -20,7 +22,6 @@ import app.mantrailing.session.SessionRepository
 import app.mantrailing.session.TrackSource
 import app.mantrailing.session.TrailSession
 import app.mantrailing.track.TrackStats
-import app.mantrailing.tractive.Pet
 import app.mantrailing.tractive.Position
 import app.mantrailing.tractive.TractiveApi
 import app.mantrailing.tractive.TractiveAuthException
@@ -62,8 +63,12 @@ data class TimeRange(val date: LocalDate, val start: LocalTime, val end: LocalTi
 
 data class UiState(
     val ready: Boolean = false,
-    val stored: StoredSession? = null,
-    val pets: List<Pet> = emptyList(),
+    /** Compte Tractive connecté. */
+    val tractive: Session? = null,
+    /** Chiens de l'équipe. */
+    val dogs: List<Dog> = emptyList(),
+    /** Chien sélectionné : c'est lui qui cherche. */
+    val activeDogId: String? = null,
     val range: TimeRange = TimeRange.lastHours(3),
     val busy: Boolean = false,
     val message: String? = null,
@@ -95,8 +100,14 @@ data class UiState(
     /** Notes affichées sur la carte (recherche enregistrée ou démo). */
     val notes: List<SearchNote> = emptyList(),
 ) {
-    val connected get() = stored?.pet != null
-    val dogName get() = stored?.pet?.name ?: "Mon chien"
+    val activeDog: Dog? get() = dogs.find { it.id == activeDogId }
+
+    /** Le collier du chien sélectionné est utilisable (compte Tractive connecté). */
+    val connected get() = tractive != null && activeDog?.hasCollar == true
+    val dogName get() = activeDog?.name ?: "Mon chien"
+
+    /** Collier de [dogId], si le compte Tractive est connecté. */
+    fun trackerOf(dogId: String?): String? = tractive?.let { dogs.find { it.id == dogId }?.trackerId }
 }
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -110,19 +121,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
-            val stored = store.session.first()
+            val tractive = store.tractive.first()
+            val dogs = store.dogs.first()
+            val activeDogId = store.activeDogId.first()?.takeIf { id -> dogs.any { it.id == id } } ?: dogs.firstOrNull()?.id
             val recording = store.activeRecording.first()
             val sessions = withContext(Dispatchers.IO) { repository.list() }
             val trails = withContext(Dispatchers.IO) { trailRepository.list() }
             _state.update {
                 it.copy(
-                    ready = true, stored = stored, trackSource = store.trackSource.first(),
+                    ready = true, tractive = tractive, dogs = dogs, activeDogId = activeDogId, trackSource = store.trackSource.first(),
                     recording = recording, sessions = sessions, trails = trails,
                     quickNotes = store.quickNotes.first(),
                     recordingNotes = if (recording?.kind == RecordingKind.SEARCH) withContext(Dispatchers.IO) { notesBuffer.read() } else emptyList(),
                 )
             }
-            if (stored != null && stored.pet == null) loadPets()
+            // Enregistre la liste (migration du chien unique d'avant) ; compte connecté sans chien lié : import.
+            store.saveDogs(dogs, activeDogId)
+            if (tractive != null && dogs.none { it.tractivePetId != null }) syncTractiveDogs()
             // Appli relancée pendant un enregistrement au GPS du téléphone : on le reprend.
             if (recording?.source == TrackSource.PHONE && !PhoneRecordingService.running.value &&
                 PhoneRecordingService.hasLocationPermission(getApplication())
@@ -143,8 +158,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val session = api.login(email.trim(), password)
         store.saveSession(session)
-        _state.update { it.copy(stored = StoredSession(session, null), demo = false, segments = emptyList(), stats = null) }
-        fetchPets()
+        _state.update { it.copy(tractive = session, demo = false, segments = emptyList(), stats = null) }
+        fetchTractiveDogs()
     }
 
     fun startDemo() = _state.update {
@@ -169,26 +184,70 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun loadPets() = run { fetchPets() }
+    // ---------- Chiens ----------
 
-    private suspend fun fetchPets() {
-        val session = _state.value.stored?.session ?: return
+    /** Importe (ou met à jour) les chiens du compte Tractive. */
+    fun syncTractiveDogs() = run { fetchTractiveDogs() }
+
+    private suspend fun fetchTractiveDogs() {
+        val session = _state.value.tractive ?: return
         val pets = api.pets(session)
-        _state.update { it.copy(pets = pets) }
-        // Un seul chien : on le choisit d'office.
-        pets.singleOrNull()?.let { selectPetNow(it) }
+        val s = _state.value
+        val merged = mergeTractivePets(s.dogs, pets, store.ignoredPetIds.first()) { UUID.randomUUID().toString() }
+        // Premier import : le chien sélectionné est le premier qui porte un collier.
+        val active = s.activeDogId?.takeIf { id -> merged.any { it.id == id } }
+            ?: (merged.firstOrNull { it.hasCollar } ?: merged.firstOrNull())?.id
+        saveDogs(merged, active)
+        _state.update {
+            it.copy(
+                message = when {
+                    pets.isEmpty() -> "Aucun animal trouvé sur ce compte Tractive."
+                    else -> "Chiens Tractive à jour : ${pets.joinToString { p -> p.name }}."
+                },
+            )
+        }
     }
 
-    fun selectPet(pet: Pet) = run { selectPetNow(pet) }
-
-    private suspend fun selectPetNow(pet: Pet) {
-        store.savePet(pet)
-        _state.update { s -> s.copy(stored = s.stored?.copy(pet = pet), demo = false) }
+    private suspend fun saveDogs(dogs: List<Dog>, activeDogId: String?) {
+        store.saveDogs(dogs, activeDogId)
+        _state.update { it.copy(dogs = dogs, activeDogId = activeDogId) }
     }
 
-    fun changePet() {
-        _state.update { s -> s.copy(stored = s.stored?.copy(pet = null), segments = emptyList(), stats = null, loadedOnce = false) }
-        loadPets()
+    /** Chien qui va chercher ; on revient à la carte vierge. */
+    fun selectDog(dog: Dog) {
+        viewModelScope.launch {
+            if (_state.value.recording != null) return@launch
+            saveDogs(_state.value.dogs, dog.id)
+            _state.update { it.clearedDisplay() }
+        }
+    }
+
+    /** Nouveau chien sans collier (sa trace sera prise au téléphone) ; il devient le chien sélectionné. */
+    fun addDog(name: String) {
+        val clean = name.trim().takeIf { it.isNotEmpty() } ?: return
+        viewModelScope.launch {
+            val dog = Dog(UUID.randomUUID().toString(), clean)
+            saveDogs(_state.value.dogs + dog, dog.id)
+        }
+    }
+
+    fun renameDog(dog: Dog, name: String) {
+        val clean = name.trim().takeIf { it.isNotEmpty() } ?: return
+        viewModelScope.launch {
+            saveDogs(_state.value.dogs.map { if (it.id == dog.id) it.copy(name = clean) else it }, _state.value.activeDogId)
+        }
+    }
+
+    /** Retire le chien de l'appli ; ses recherches restent dans « Mes pistes ». */
+    fun deleteDog(dog: Dog) {
+        viewModelScope.launch {
+            val s = _state.value
+            if (s.recording?.dogId == dog.id) return@launch
+            // Animal Tractive retiré (le chat de la maison…) : pas réimporté à la prochaine synchronisation.
+            dog.tractivePetId?.let { store.saveIgnoredPetIds(store.ignoredPetIds.first() + it) }
+            val remaining = s.dogs.filter { it.id != dog.id }
+            saveDogs(remaining, s.activeDogId?.takeIf { it != dog.id } ?: remaining.firstOrNull()?.id)
+        }
     }
 
     fun setRange(range: TimeRange) = _state.update { it.copy(range = range) }
@@ -196,8 +255,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun loadTrack() = run {
         val s = _state.value
         if (s.demo) return@run
-        val session = s.stored?.session ?: return@run
-        val tracker = s.stored.pet?.trackerId ?: error("Ce chien n'a pas de collier associé.")
+        val session = s.tractive ?: return@run
+        val tracker = s.activeDog?.trackerId ?: error("Ce chien n'a pas de collier associé.")
         require(s.range.isValid) { "L'heure de fin doit être après l'heure de début." }
         val segments = api.positions(session, tracker, s.range.from(), s.range.to())
         _state.update {
@@ -216,8 +275,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setLive(active: Boolean) = run {
         val s = _state.value
         if (s.demo) return@run
-        val session = s.stored?.session ?: return@run
-        val tracker = s.stored.pet?.trackerId ?: error("Ce chien n'a pas de collier associé.")
+        val session = s.tractive ?: return@run
+        val tracker = s.activeDog?.trackerId ?: error("Ce chien n'a pas de collier associé.")
         api.setLiveTracking(session, tracker, active)
         _state.update {
             it.copy(message = if (active) "Mode LIVE demandé : il peut mettre une minute à démarrer sur le collier." else "Mode LIVE arrêté.")
@@ -258,7 +317,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val s = _state.value
         val recording = ActiveRecording(
-            UUID.randomUUID().toString(), s.dogName, source, Instant.now().epochSecond, RecordingKind.SEARCH, trailId,
+            UUID.randomUUID().toString(), s.dogName, source, Instant.now().epochSecond, RecordingKind.SEARCH, trailId, s.activeDog?.id,
         )
         var message: String? = null
         when (source) {
@@ -267,8 +326,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 PhoneRecordingService.start(getApplication())
             }
             TrackSource.TRACTIVE -> {
-                val session = s.stored?.session ?: error("Connecte d'abord le collier Tractive dans les paramètres.")
-                val tracker = s.stored.pet?.trackerId ?: error("Ce chien n'a pas de collier associé.")
+                val session = s.tractive ?: error("Connecte d'abord le collier Tractive dans les paramètres.")
+                val tracker = s.activeDog?.trackerId ?: error("${s.dogName} n'a pas de collier associé.")
                 // Sans le mode LIVE, le collier n'envoie qu'un point toutes les quelques minutes.
                 message = try {
                     api.setLiveTracking(session, tracker, true)
@@ -372,9 +431,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (points.isEmpty()) message = "Aucune position GPS enregistrée : signal trop faible ?"
                 listOf(points).filter { it.isNotEmpty() }
             }
-            TrackSource.TRACTIVE -> fetchCollarTrack(recording.startedAt, endedAt).also { segs ->
+            TrackSource.TRACTIVE -> fetchCollarTrack(recording.dogId, recording.startedAt, endedAt).also { segs ->
                 if (segs.isEmpty()) message = "Trace du collier pas encore disponible : rouvre la recherche un peu plus tard depuis « Mes pistes »."
-                stopLiveQuietly()
+                stopLiveQuietly(recording.dogId)
             }
         }
         val trail = recording.trailId?.let { id ->
@@ -384,7 +443,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val session = TrailSession(
             recording.id, recording.dogName, recording.source, recording.startedAt, endedAt, segments,
             trailId = trail?.id, trail = trail?.points.orEmpty(), trailEndedAt = trail?.endedAt,
-            notes = locateNotes(notes, segments.flatten()),
+            notes = locateNotes(notes, segments.flatten()), dogId = recording.dogId,
         )
         withContext(Dispatchers.IO) {
             repository.save(session)
@@ -402,11 +461,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         showSession(session)
     }
 
-    /** Positions du collier pendant la recherche (avec une marge d'une minute). Vide en cas d'échec réseau. */
-    private suspend fun fetchCollarTrack(startedAt: Long, endedAt: Long): List<List<Position>> {
+    /** Positions du collier de [dogId] pendant la recherche (avec une marge d'une minute). Vide en cas d'échec réseau. */
+    private suspend fun fetchCollarTrack(dogId: String?, startedAt: Long, endedAt: Long): List<List<Position>> {
         val s = _state.value
-        val session = s.stored?.session ?: return emptyList()
-        val tracker = s.stored.pet?.trackerId ?: return emptyList()
+        val session = s.tractive ?: return emptyList()
+        val tracker = s.trackerOf(dogId) ?: return emptyList()
         return try {
             api.positions(session, tracker, Instant.ofEpochSecond(startedAt - 60), Instant.ofEpochSecond(endedAt + 60))
         } catch (e: TractiveAuthException) {
@@ -416,10 +475,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun stopLiveQuietly() {
+    private suspend fun stopLiveQuietly(dogId: String?) {
         val s = _state.value
-        val session = s.stored?.session ?: return
-        val tracker = s.stored.pet?.trackerId ?: return
+        val session = s.tractive ?: return
+        val tracker = s.trackerOf(dogId) ?: return
         runCatching { api.setLiveTracking(session, tracker, false) }
     }
 
@@ -428,8 +487,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun openSession(session: TrailSession) = run {
         showSession(session)
         // Recherche au collier enregistrée avant que Tractive ait transmis les positions : nouvel essai.
-        if (session.source == TrackSource.TRACTIVE && session.segments.isEmpty() && _state.value.connected) {
-            val segments = fetchCollarTrack(session.startedAt, session.endedAt)
+        val dogId = session.dogId ?: _state.value.dogs.find { it.name == session.dogName }?.id
+        if (session.source == TrackSource.TRACTIVE && session.segments.isEmpty() && _state.value.trackerOf(dogId) != null) {
+            val segments = fetchCollarTrack(dogId, session.startedAt, session.endedAt)
             if (segments.isEmpty()) {
                 _state.update { it.copy(message = "Le collier n'a toujours pas transmis de positions pour cette recherche.") }
             } else {
@@ -492,7 +552,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun logout() {
         viewModelScope.launch {
             store.clearTractive()
-            _state.update { it.copy(stored = null, pets = emptyList(), segments = emptyList(), stats = null, openedSession = null, loadedOnce = false) }
+            _state.update { it.copy(tractive = null, segments = emptyList(), stats = null, openedSession = null, loadedOnce = false) }
         }
     }
 
@@ -509,11 +569,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: TractiveAuthException) {
-                val wasLoggedIn = _state.value.stored != null
+                val wasLoggedIn = _state.value.tractive != null
                 store.clearTractive()
                 _state.update {
                     it.copy(
-                        stored = null, pets = emptyList(),
+                        tractive = null,
                         message = if (wasLoggedIn) "Session Tractive expirée, reconnecte-toi dans les paramètres." else "Email ou mot de passe incorrect.",
                     )
                 }

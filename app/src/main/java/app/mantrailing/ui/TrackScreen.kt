@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import app.mantrailing.TimeRange
 import app.mantrailing.UiState
 import app.mantrailing.demo.DemoSession
+import app.mantrailing.session.Dog
 import app.mantrailing.session.LaidTrail
 import app.mantrailing.session.NoteCategory
 import app.mantrailing.session.NoteType
@@ -70,6 +71,8 @@ data class TrackActions(
     val onLoad: () -> Unit = {},
     val onLive: (Boolean) -> Unit = {},
     val onOpenSettings: () -> Unit = {},
+    /** Choisir le chien qui va chercher. */
+    val onSelectDog: (Dog) -> Unit = {},
     val onStartDemo: () -> Unit = {},
     val onExitDemo: () -> Unit = {},
     val onDismissMessage: () -> Unit = {},
@@ -104,12 +107,20 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
         state.demo -> "${DemoSession.DOG_NAME} (démo)"
         state.openedSession != null -> state.openedSession.dogName
         state.openedTrail != null -> "Piste posée"
-        else -> state.stored?.pet?.name ?: "Mantrailing"
+        state.recording != null && state.recording.kind == RecordingKind.SEARCH -> state.recording.dogName
+        else -> state.activeDog?.name ?: "Mantrailing"
     }
+    // Accueil sans rien d'ouvert : le titre permet de choisir le chien qui va chercher.
+    val choosingDog = state.dogs.isNotEmpty() && !state.demo && state.recording == null &&
+        state.openedSession == null && state.openedTrail == null
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                if (choosingDog) {
+                    DogPicker(state.dogs, state.activeDog, actions.onSelectDog, actions.onOpenSettings, Modifier.weight(1f))
+                } else {
+                    Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                }
                 if (state.connected && !state.demo && state.recording == null) {
                     OutlinedButton(onClick = { actions.onLive(true) }, enabled = !state.busy) { Text("Activer LIVE") }
                 }
@@ -193,7 +204,7 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
                 notes = state.notes, onNoteClick = { editedNoteId = it.id },
             )
             val idle = !state.demo && state.recording == null && state.openedSession == null && state.openedTrail == null && state.segments.isEmpty()
-            if (!state.connected && idle) Welcome(state, actions, Modifier.align(Alignment.Center))
+            if (state.tractive == null && state.dogs.isEmpty() && idle) Welcome(actions, Modifier.align(Alignment.Center))
             state.message?.let { msg ->
                 Surface(
                     onClick = actions.onDismissMessage,
@@ -254,7 +265,10 @@ private fun RecordingBanner(state: UiState, onStop: () -> Unit) {
     val elapsed = formatDuration((now - recording.startedAt).coerceAtLeast(0))
     Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.testTag("recording")) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (laying) "Pose de la piste · $elapsed" else "Recherche en cours · $elapsed", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (laying) "Pose de la piste · $elapsed" else "Recherche de ${recording.dogName} · $elapsed",
+                style = MaterialTheme.typography.titleMedium,
+            )
             Text(
                 when {
                     laying -> "Parcours du traceur au GPS du téléphone · ${state.recordingPoints} positions"
@@ -348,21 +362,18 @@ fun formatSessionDate(epochSeconds: Long, zone: ZoneId = ZoneId.systemDefault())
     Instant.ofEpochSecond(epochSeconds).atZone(zone).format(SESSION_DATE_FORMAT)
 
 @Composable
-private fun Welcome(state: UiState, actions: TrackActions, modifier: Modifier) {
+private fun Welcome(actions: TrackActions, modifier: Modifier) {
     Card(modifier.padding(24.dp).testTag("welcome")) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Bienvenue !", style = MaterialTheme.typography.titleLarge)
             Text(
-                if (state.stored == null) {
-                    "Le traceur enregistre son parcours avec « Poser une piste ». « Démarrer une recherche » enregistre " +
-                        "ensuite la trace du chien avec le GPS du téléphone, ou avec son collier si vous connectez votre compte Tractive."
-                } else {
-                    "Choisissez votre chien dans les paramètres."
-                },
+                "Le traceur enregistre son parcours avec « Poser une piste ». « Démarrer une recherche » enregistre " +
+                    "ensuite la trace du chien avec le GPS du téléphone, ou avec son collier si vous connectez votre compte Tractive. " +
+                    "Ajoutez vos chiens pour que chacun garde ses recherches.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Button(onClick = actions.onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                Text(if (state.stored == null) "Connecter un collier Tractive" else "Paramètres")
+                Text("Ajouter mes chiens")
             }
             OutlinedButton(onClick = actions.onStartDemo, modifier = Modifier.fillMaxWidth()) { Text("Voir une séance de démonstration") }
         }
