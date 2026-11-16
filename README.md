@@ -40,7 +40,9 @@ sous le nom `keystore.properties` (non versionné).
 Le fichier `release\mantrailing-v<N>.aab` est à envoyer dans Play Console. Le versionCode est le nombre de
 commits : il faut donc commiter entre deux envois. Un tag `play-v<N>` marque la version envoyée.
 
-Politique de confidentialité à publier en ligne : [docs/politique-confidentialite.md](docs/politique-confidentialite.md).
+Politique de confidentialité : https://djkspr.github.io/mantrailing-site/politique-confidentialite.html
+(source : dépôt public `mantrailing-site`, dans `..\mantrailing-site`). La mettre à jour à chaque nouvelle donnée
+traitée (ex. GPS du téléphone pour la piste du traceur).
 
 ## API Tractive
 
