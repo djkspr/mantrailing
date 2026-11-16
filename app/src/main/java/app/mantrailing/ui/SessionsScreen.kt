@@ -25,20 +25,28 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import app.mantrailing.session.LaidTrail
 import app.mantrailing.session.TrailSession
 import app.mantrailing.track.TrackStats
+import app.mantrailing.track.TrailDeviation
 import java.util.Locale
 
 data class SessionsActions(
     val onBack: () -> Unit = {},
     val onOpen: (TrailSession) -> Unit = {},
     val onDelete: (TrailSession) -> Unit = {},
+    val onOpenTrail: (LaidTrail) -> Unit = {},
+    val onDeleteTrail: (LaidTrail) -> Unit = {},
 )
 
-/** « Mes pistes » : les pistes enregistrées, la plus récente d'abord. */
+/** Élément à supprimer, en attente de confirmation. */
+private data class PendingDelete(val label: String, val confirm: () -> Unit)
+
+/** « Mes pistes » : les pistes posées par le traceur et les recherches du chien, les plus récentes d'abord. */
 @Composable
-fun SessionsScreen(sessions: List<TrailSession>, actions: SessionsActions) {
-    var toDelete by remember { mutableStateOf<TrailSession?>(null) }
+fun SessionsScreen(sessions: List<TrailSession>, trails: List<LaidTrail>, actions: SessionsActions) {
+    var toDelete by remember { mutableStateOf<PendingDelete?>(null) }
+    val searched = remember(sessions) { sessions.mapNotNull { it.trailId }.toSet() }
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = actions.onBack, modifier = Modifier.semantics { contentDescription = "Retour" }) {
@@ -46,45 +54,81 @@ fun SessionsScreen(sessions: List<TrailSession>, actions: SessionsActions) {
             }
             Text("Mes pistes", style = MaterialTheme.typography.headlineSmall)
         }
-        if (sessions.isEmpty()) {
+        if (sessions.isEmpty() && trails.isEmpty()) {
             Text(
-                "Aucune piste enregistrée. Sur l'accueil, « Démarrer une piste » au départ du chien, puis « Terminer la piste » à l'arrivée.",
+                "Rien d'enregistré pour l'instant. Sur l'accueil, le traceur commence par « Poser une piste » ; " +
+                    "au départ du chien, « Démarrer une recherche ».",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(sessions, key = { it.id }) { session ->
-                val stats = remember(session) { TrackStats.of(session.segments) }
-                Card(onClick = { actions.onOpen(session) }, modifier = Modifier.fillMaxWidth().testTag("session-${session.id}")) {
-                    Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(formatSessionDate(session.startedAt).replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleMedium)
-                            Text("${session.dogName} · ${sourceLabel(session.source)}", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                if (stats.pointCount == 0) {
-                                    "Trace pas encore récupérée · ${formatDuration(session.endedAt - session.startedAt)}"
-                                } else {
-                                    "%.2f km · %s".format(Locale.FRENCH, stats.distanceMeters / 1000, formatDuration(session.endedAt - session.startedAt))
-                                },
-                                style = MaterialTheme.typography.bodySmall,
+            if (trails.isNotEmpty()) {
+                item { SectionTitle("Pistes posées") }
+                items(trails, key = { "trail-${it.id}" }) { trail ->
+                    ItemCard(
+                        tag = "trail-${trail.id}",
+                        title = formatSessionDate(trail.startedAt).replaceFirstChar { it.uppercase() },
+                        line1 = if (trail.id in searched) "Piste travaillée" else "Pas encore travaillée",
+                        line2 = "%.2f km · pose en %s".format(Locale.FRENCH, trailLength(trail) / 1000, formatDuration(trail.endedAt - trail.startedAt)),
+                        onClick = { actions.onOpenTrail(trail) },
+                        onDelete = { toDelete = PendingDelete("la piste posée le ${formatSessionDate(trail.startedAt)}") { actions.onDeleteTrail(trail) } },
+                    )
+                }
+            }
+            if (sessions.isNotEmpty()) {
+                item { SectionTitle("Recherches") }
+                items(sessions, key = { "session-${it.id}" }) { session ->
+                    val stats = remember(session) { TrackStats.of(session.segments) }
+                    val deviation = remember(session) { TrailDeviation.of(session.trail, session.segments.flatten()) }
+                    ItemCard(
+                        tag = "session-${session.id}",
+                        title = formatSessionDate(session.startedAt).replaceFirstChar { it.uppercase() },
+                        line1 = "${session.dogName} · ${sourceLabel(session.source)}" +
+                            (session.trailAgeSeconds?.let { " · piste de ${formatDuration(it)}" } ?: ""),
+                        line2 = when {
+                            stats.pointCount == 0 -> "Trace pas encore récupérée · ${formatDuration(session.endedAt - session.startedAt)}"
+                            deviation != null -> "%.2f km · %s · écart moyen %.0f m · arrivée %s".format(
+                                Locale.FRENCH, stats.distanceMeters / 1000, formatDuration(session.endedAt - session.startedAt),
+                                deviation.meanMeters, if (deviation.reachedEnd) "atteinte" else "pas atteinte",
                             )
-                        }
-                        TextButton(onClick = { toDelete = session }) { Text("Supprimer") }
-                    }
+                            else -> "%.2f km · %s".format(Locale.FRENCH, stats.distanceMeters / 1000, formatDuration(session.endedAt - session.startedAt))
+                        },
+                        onClick = { actions.onOpen(session) },
+                        onDelete = { toDelete = PendingDelete("la recherche du ${formatSessionDate(session.startedAt)}") { actions.onDelete(session) } },
+                    )
                 }
             }
         }
     }
 
-    toDelete?.let { session ->
+    toDelete?.let { pending ->
         AlertDialog(
             onDismissRequest = { toDelete = null },
-            title = { Text("Supprimer la piste ?") },
-            text = { Text("La piste du ${formatSessionDate(session.startedAt)} sera supprimée de ce téléphone.") },
+            title = { Text("Supprimer ?") },
+            text = { Text("${pending.label.replaceFirstChar { it.uppercase() }} sera supprimée de ce téléphone.") },
             confirmButton = {
-                TextButton(onClick = { actions.onDelete(session); toDelete = null }) { Text("Supprimer définitivement") }
+                TextButton(onClick = { pending.confirm(); toDelete = null }) { Text("Supprimer définitivement") }
             },
             dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Annuler") } },
         )
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
+}
+
+@Composable
+private fun ItemCard(tag: String, title: String, line1: String, line2: String, onClick: () -> Unit, onDelete: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth().testTag(tag)) {
+        Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(line1, style = MaterialTheme.typography.bodyMedium)
+                Text(line2, style = MaterialTheme.typography.bodySmall)
+            }
+            TextButton(onClick = onDelete) { Text("Supprimer") }
+        }
     }
 }

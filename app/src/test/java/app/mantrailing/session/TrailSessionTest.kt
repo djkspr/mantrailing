@@ -126,6 +126,51 @@ class TrailSessionTest {
         assertEquals(1.0, TrackStats.of(session("a", 0).segments).gpsShare, 0.0)
     }
 
+    // --- Pistes posées ---
+
+    private fun trail(id: String, endedAt: Long, points: Int = 3) =
+        LaidTrail(id, endedAt - 300, endedAt, (0 until points).map { Position(endedAt - 300 + it, 44.0 + it * 0.0001, 2.0) })
+
+    @Test
+    fun `pistes posées - enregistrées, relues, supprimées`() {
+        val repo = LaidTrailRepository(tmp.root)
+        repo.save(trail("ancienne", 1_000))
+        repo.save(trail("recente", 9_000))
+        assertEquals(listOf("recente", "ancienne"), repo.list().map { it.id })
+        assertEquals(trail("recente", 9_000), repo.load("recente"))
+        repo.delete("recente")
+        assertEquals(listOf("ancienne"), repo.list().map { it.id })
+    }
+
+    @Test
+    fun `pistes proposées au départ - récentes, non vides, pas encore travaillées`() {
+        val now = 200_000L
+        val trails = listOf(
+            trail("libre", now - 3600),
+            trail("travaillee", now - 1800),
+            trail("trop-vieille", now - 49 * 3600),
+            trail("vide", now - 600, points = 0),
+        )
+        val sessions = listOf(session("s", now - 1000).copy(trailId = "travaillee"))
+        assertEquals(listOf("libre"), availableTrails(trails, sessions, now).map { it.id })
+    }
+
+    @Test
+    fun `âge de la piste au départ du chien`() {
+        val s = session("s", startedAt = 10_000).copy(trailEndedAt = 10_000 - 45 * 60)
+        assertEquals(2_700L, s.trailAgeSeconds)
+        assertNull(session("s", 10_000).trailAgeSeconds)
+    }
+
+    @Test
+    fun `une recherche garde sa copie de la piste`() {
+        val repo = SessionRepository(tmp.root)
+        val t = trail("t", 5_000)
+        val s = session("s", 6_000).copy(trailId = t.id, trail = t.points, trailEndedAt = t.endedAt)
+        repo.save(s)
+        assertEquals(t.points, repo.load("s")!!.trail)
+    }
+
     @Test
     fun `date d'une piste en français`() {
         // 16/11/2026 13:02 UTC = 14:02 à Paris

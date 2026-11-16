@@ -16,9 +16,9 @@
       <ellipse cx="61" cy="38" rx="5.5" ry="7"/><ellipse cx="71" cy="48" rx="5.5" ry="7"/>
     </g>
     <text x="110" y="168" font-size="64" font-weight="700">Mantrailing</text>
-    <text x="64" y="250" font-size="34" font-weight="600">Suivez le travail de votre</text>
-    <text x="64" y="294" font-size="34" font-weight="600">chien, point par point.</text>
-    <text x="64" y="356" font-size="22" opacity=".85">Collier GPS · carte IGN · bilan de la recherche</text>
+    <text x="64" y="250" font-size="34" font-weight="600">La trace de votre chien,</text>
+    <text x="64" y="294" font-size="34" font-weight="600">sur la piste du traceur.</text>
+    <text x="64" y="356" font-size="22" opacity=".85">GPS du téléphone ou collier · carte IGN · écarts</text>
   </g>
 
   <!-- carte stylisée -->
@@ -35,7 +35,12 @@
     <path d="M820 230 C 870 210, 950 230, 960 260 L 960 340 C 920 360, 860 340, 830 310 C 800 285, 790 245, 820 230 Z" fill="#CFE3C0"/>
     <!-- chemin -->
     <path d="M560 300 C 640 290, 700 330, 760 300 S 880 250, 960 270" fill="none" stroke="#FFFFFF" stroke-width="10"/>
-    <!-- trace du chien (la piste du traceur sera ajoutée quand l'appli la gérera) -->
+    <!-- piste du traceur -->
+    <path d="M610 400 C 640 340, 600 290, 670 250 S 780 260, 800 200 S 860 130, 900 120"
+          fill="none" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round" opacity=".85"/>
+    <path d="M610 400 C 640 340, 600 290, 670 250 S 780 260, 800 200 S 860 130, 900 120"
+          fill="none" stroke="#1C6DD0" stroke-width="5" stroke-dasharray="12 10" stroke-linecap="round"/>
+    <!-- trace du chien -->
     <path d="M612 402 C 655 345, 590 300, 660 262 S 735 235, 770 262 S 790 225, 810 196 S 870 140, 896 124"
           fill="none" stroke="#D9480F" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
     <!-- points GPS -->
@@ -48,4 +53,13 @@
     <circle cx="896" cy="124" r="16" fill="#2B8A3E" stroke="#FFFFFF" stroke-width="5"/>
   </g>
   <rect x="560" y="60" width="400" height="380" rx="28" fill="none" stroke="#FFFFFF" stroke-opacity=".6" stroke-width="3"/>
+
+  <!-- légende -->
+  <g font-family="Segoe UI, Roboto, system-ui, sans-serif" font-size="17" fill="#3A2E28">
+    <rect x="580" y="78" width="214" height="28" rx="14" fill="#FFFFFF" opacity=".92"/>
+    <line x1="594" y1="92" x2="620" y2="92" stroke="#1C6DD0" stroke-width="4" stroke-dasharray="7 5"/>
+    <text x="628" y="98">piste</text>
+    <line x1="684" y1="92" x2="710" y2="92" stroke="#D9480F" stroke-width="6" stroke-linecap="round"/>
+    <text x="718" y="98">chien</text>
+  </g>
 </svg>

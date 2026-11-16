@@ -71,9 +71,12 @@ private val STYLE_JSON = """
 """.trimIndent()
 
 private const val DOG_SOURCE = "dog"
+private const val TRAIL_SOURCE = "trail"
+private const val TRAIL_ENDS_SOURCE = "trail-ends"
 
 @Composable
-fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier) {
+/** Carte : trace du chien ([segments], orange) et piste posée par le traceur ([trail], bleu pointillé). */
+fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier, trail: List<Position> = emptyList()) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val mapView = remember {
@@ -106,6 +109,25 @@ fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier) {
             // Vue de la France tant qu'aucune trace n'est affichée (le centre du style n'est pas appliqué).
             m.cameraPosition = CameraPosition.Builder().target(LatLng(46.6, 2.4)).zoom(4.6).build()
             m.setStyle(Style.Builder().fromJson(STYLE_JSON)) { style ->
+                // Piste du traceur, sous la trace du chien : bleu pointillé, départ vert, arrivée rouge.
+                style.addSource(GeoJsonSource(TRAIL_SOURCE))
+                style.addSource(GeoJsonSource(TRAIL_ENDS_SOURCE))
+                style.addLayer(
+                    LineLayer("trail-casing", TRAIL_SOURCE).withProperties(
+                        PropertyFactory.lineColor("#FFFFFF"),
+                        PropertyFactory.lineOpacity(0.85f),
+                        PropertyFactory.lineWidth(7f),
+                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                    ),
+                )
+                style.addLayer(
+                    LineLayer("trail-line", TRAIL_SOURCE).withProperties(
+                        PropertyFactory.lineColor(TRAIL_COLOR),
+                        PropertyFactory.lineWidth(4f),
+                        PropertyFactory.lineDasharray(arrayOf(2f, 1.5f)),
+                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                    ),
+                )
                 style.addSource(GeoJsonSource(DOG_SOURCE))
                 // Liseré blanc sous la trace : lisible sur le plan comme sur les photos aériennes.
                 style.addLayer(
@@ -139,6 +161,16 @@ fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier) {
                         ),
                     ),
                 )
+                style.addLayer(
+                    CircleLayer("trail-ends", TRAIL_ENDS_SOURCE).withProperties(
+                        PropertyFactory.circleRadius(8f),
+                        PropertyFactory.circleColor(
+                            Expression.match(Expression.get("kind"), Expression.literal(TRAIL_END_COLOR), Expression.stop("start", TRAIL_START_COLOR)),
+                        ),
+                        PropertyFactory.circleStrokeColor("#FFFFFF"),
+                        PropertyFactory.circleStrokeWidth(3f),
+                    ),
+                )
                 map = m to style
             }
         }
@@ -151,14 +183,17 @@ fun TrackMap(segments: List<List<Position>>, modifier: Modifier = Modifier) {
         }
     }
 
-    LaunchedEffect(map, segments) {
+    LaunchedEffect(map, segments, trail) {
         val (m, style) = map ?: return@LaunchedEffect
         style.getSourceAs<GeoJsonSource>(DOG_SOURCE)?.setGeoJson(toFeatures(segments))
-        val points = segments.flatten().map { LatLng(it.lat, it.lon) }
+        style.getSourceAs<GeoJsonSource>(TRAIL_SOURCE)?.setGeoJson(trailLine(trail))
+        style.getSourceAs<GeoJsonSource>(TRAIL_ENDS_SOURCE)?.setGeoJson(trailEnds(trail))
+        val points = (segments.flatten() + trail).map { LatLng(it.lat, it.lon) }
         when {
             points.size == 1 -> m.easeCamera(CameraUpdateFactory.newLatLngZoom(points.first(), 16.0))
             points.size > 1 -> m.easeCamera(
-                CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(points).build(), 80),
+                // Marge plus grande en haut : le bouton de fond de carte ne doit pas cacher l'arrivée.
+                CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(points).build(), 80, 220, 80, 80),
             )
         }
     }
@@ -182,3 +217,17 @@ private fun toFeatures(segments: List<List<Position>>): FeatureCollection {
     }
     return FeatureCollection.fromFeatures(features)
 }
+
+private fun trailLine(trail: List<Position>): FeatureCollection =
+    if (trail.size < 2) FeatureCollection.fromFeatures(emptyList<Feature>())
+    else FeatureCollection.fromFeature(Feature.fromGeometry(LineString.fromLngLats(trail.map { Point.fromLngLat(it.lon, it.lat) })))
+
+private fun trailEnds(trail: List<Position>): FeatureCollection {
+    if (trail.isEmpty()) return FeatureCollection.fromFeatures(emptyList<Feature>())
+    fun end(p: Position, kind: String) = Feature.fromGeometry(Point.fromLngLat(p.lon, p.lat)).apply { addStringProperty("kind", kind) }
+    return FeatureCollection.fromFeatures(listOf(end(trail.first(), "start"), end(trail.last(), "end")))
+}
+
+const val TRAIL_COLOR = "#1C6DD0"
+private const val TRAIL_START_COLOR = "#2B8A3E"
+private const val TRAIL_END_COLOR = "#C92A2A"

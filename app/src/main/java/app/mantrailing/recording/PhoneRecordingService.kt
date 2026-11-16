@@ -51,7 +51,8 @@ class PhoneRecordingService : Service(), LocationListener {
             stopSelf()
             return START_NOT_STICKY
         }
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        val laying = intent?.getBooleanExtra(EXTRA_TRAIL, false) ?: false
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(laying), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
         startUpdates()
         _running.value = true
         return START_STICKY
@@ -83,11 +84,11 @@ class PhoneRecordingService : Service(), LocationListener {
         super.onDestroy()
     }
 
-    private fun notification(): Notification {
+    private fun notification(laying: Boolean): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Piste en cours", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Affichée pendant l'enregistrement GPS d'une piste"
+            NotificationChannel(CHANNEL_ID, "Enregistrement en cours", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Affichée pendant l'enregistrement GPS d'une piste ou d'une recherche"
             },
         )
         val open = PendingIntent.getActivity(
@@ -97,8 +98,11 @@ class PhoneRecordingService : Service(), LocationListener {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Piste en cours")
-            .setContentText("Enregistrement GPS du téléphone. Ouvrez l'appli pour terminer la piste.")
+            .setContentTitle(if (laying) "Pose de la piste en cours" else "Recherche en cours")
+            .setContentText(
+                if (laying) "Enregistrement GPS du parcours du traceur. Ouvrez l'appli pour terminer la pose."
+                else "Enregistrement GPS du téléphone. Ouvrez l'appli pour terminer la recherche.",
+            )
             .setContentIntent(open)
             .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
@@ -122,8 +126,14 @@ class PhoneRecordingService : Service(), LocationListener {
         fun hasLocationPermission(context: Context) =
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
-        fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, PhoneRecordingService::class.java))
+        private const val EXTRA_TRAIL = "trail"
+
+        /** [layingTrail] : pose de la piste par le traceur (sinon recherche du chien), pour le texte de la notification. */
+        fun start(context: Context, layingTrail: Boolean = false) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, PhoneRecordingService::class.java).putExtra(EXTRA_TRAIL, layingTrail),
+            )
         }
 
         /** Arrête l'enregistrement et renvoie les positions enregistrées (le tampon est vidé). */

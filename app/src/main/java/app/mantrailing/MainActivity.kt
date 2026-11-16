@@ -33,7 +33,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.mantrailing.recording.PhoneRecordingService
 import app.mantrailing.session.StartDecision
 import app.mantrailing.session.TrackSource
+import app.mantrailing.session.availableTrails
 import app.mantrailing.session.decideSource
+import app.mantrailing.ui.TrailChoiceDialog
+import java.time.Instant
 import app.mantrailing.ui.SessionsActions
 import app.mantrailing.ui.SessionsScreen
 import app.mantrailing.ui.SettingsActions
@@ -62,8 +65,11 @@ private fun App(vm: MainViewModel = viewModel()) {
     val context = LocalContext.current
     var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
     var askSource by remember { mutableStateOf(false) }
-    // Choix à mémoriser une fois l'autorisation de localisation accordée.
+    var askTrail by remember { mutableStateOf(false) }
+    // En attente de l'autorisation de localisation : pose de piste, ou recherche (choix à mémoriser, piste suivie).
+    var pendingLayTrail by remember { mutableStateOf(false) }
     var rememberPendingChoice by remember { mutableStateOf(false) }
+    var pendingTrailId by remember { mutableStateOf<String?>(null) }
 
     // Compte de démonstration saisi dans les paramètres, ou chien choisi : retour à la carte.
     LaunchedEffect(state.demo, state.stored?.pet) {
@@ -71,25 +77,49 @@ private fun App(vm: MainViewModel = viewModel()) {
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-        if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            vm.startRecording(TrackSource.PHONE, rememberPendingChoice)
+        when {
+            result[Manifest.permission.ACCESS_FINE_LOCATION] != true ->
+                vm.showMessage("Sans l'autorisation de localisation précise, le téléphone ne peut rien enregistrer.")
+            pendingLayTrail -> vm.startTrailLaying()
+            else -> vm.startRecording(TrackSource.PHONE, rememberPendingChoice, pendingTrailId)
+        }
+    }
+
+    fun requestLocation() {
+        val permissions = buildList {
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            // Notification d'enregistrement en cours (l'enregistrement fonctionne aussi sans).
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        permissionLauncher.launch(permissions.toTypedArray())
+    }
+
+    fun layTrail() {
+        if (PhoneRecordingService.hasLocationPermission(context)) {
+            vm.startTrailLaying()
         } else {
-            vm.showMessage("Sans l'autorisation de localisation précise, le téléphone ne peut pas enregistrer la piste.")
+            pendingLayTrail = true
+            requestLocation()
         }
     }
 
     fun startWith(source: TrackSource, remember: Boolean) {
         if (source == TrackSource.PHONE && !PhoneRecordingService.hasLocationPermission(context)) {
+            pendingLayTrail = false
             rememberPendingChoice = remember
-            val permissions = buildList {
-                add(Manifest.permission.ACCESS_FINE_LOCATION)
-                add(Manifest.permission.ACCESS_COARSE_LOCATION)
-                // Notification « Piste en cours » (l'enregistrement fonctionne aussi sans).
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            permissionLauncher.launch(permissions.toTypedArray())
+            requestLocation()
         } else {
-            vm.startRecording(source, remember)
+            vm.startRecording(source, remember, pendingTrailId)
+        }
+    }
+
+    /** Recherche sur [trailId] (ou sans piste) : source de la trace, proposée si besoin, puis départ. */
+    fun beginSearch(trailId: String?) {
+        pendingTrailId = trailId
+        when (val decision = decideSource(state.trackSource, state.connected)) {
+            StartDecision.AskSource -> askSource = true
+            is StartDecision.Start -> startWith(decision.source, remember = false)
         }
     }
 
@@ -114,10 +144,13 @@ private fun App(vm: MainViewModel = viewModel()) {
             BackHandler { screen = Screen.HOME }
             SessionsScreen(
                 state.sessions,
+                state.trails,
                 SessionsActions(
                     onBack = { screen = Screen.HOME },
                     onOpen = { vm.openSession(it); screen = Screen.HOME },
                     onDelete = vm::deleteSession,
+                    onOpenTrail = { vm.openTrail(it); screen = Screen.HOME },
+                    onDeleteTrail = vm::deleteTrail,
                 ),
             )
         }
@@ -132,15 +165,26 @@ private fun App(vm: MainViewModel = viewModel()) {
                 onExitDemo = vm::exitDemo,
                 onDismissMessage = vm::dismissMessage,
                 onStartRecording = {
-                    when (val decision = decideSource(state.trackSource, state.connected)) {
-                        StartDecision.AskSource -> askSource = true
-                        is StartDecision.Start -> startWith(decision.source, remember = false)
-                    }
+                    // Pistes posées récemment et pas encore travaillées : on demande laquelle le chien suit.
+                    if (availableTrails(state.trails, state.sessions, Instant.now().epochSecond).isNotEmpty()) askTrail = true
+                    else beginSearch(null)
                 },
+                onLayTrail = ::layTrail,
+                onStartSearchOnTrail = { beginSearch(it.id) },
                 onStopRecording = vm::stopRecording,
                 onOpenSessions = { screen = Screen.SESSIONS },
                 onCloseSession = vm::closeSession,
             ),
+        )
+    }
+
+    if (askTrail) {
+        val now = Instant.now().epochSecond
+        TrailChoiceDialog(
+            trails = availableTrails(state.trails, state.sessions, now),
+            now = now,
+            onChoose = { trail -> askTrail = false; beginSearch(trail?.id) },
+            onDismiss = { askTrail = false },
         )
     }
 

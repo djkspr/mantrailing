@@ -38,6 +38,10 @@ if (-not $SkipDeviceTests) {
     # Une version signée différemment (release) déjà installée empêcherait l'installation des tests.
     $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
     & $adb uninstall app.mantrailing 2>&1 | Out-Null
+    # Écran allumé pendant les tests : en veille, les tests d'interface échouent tous.
+    & $adb shell svc power stayon true
+    & $adb shell input keyevent 224
+    & $adb shell wm dismiss-keyguard
     $results = 'app\build\outputs\androidTest-results\connected'
     foreach ($attempt in 1, 2) {
         & .\gradlew.bat connectedDebugAndroidTest --console=plain

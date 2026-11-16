@@ -6,30 +6,37 @@ Mantrailing
 
 ## Brève description (80 caractères max)
 
-La trace GPS de votre chien de mantrailing sur carte IGN, point par point.
+La trace GPS de votre chien comparée à la piste du traceur, sur carte IGN.
 
 ## Description complète (4000 caractères max)
 
-Mantrailing aide les maîtres-chiens à analyser les séances de pistage de personnes (mantrailing).
+Mantrailing aide les maîtres-chiens à analyser les séances de pistage de personnes (mantrailing) : la trace du chien est superposée à la piste réellement posée par le traceur.
 
-Au départ du chien, « Démarrer une piste » ; à l'arrivée, « Terminer la piste ». L'application enregistre le parcours du chien et l'affiche sur la carte : vous voyez où il a travaillé, où il a hésité, où il a fait demi-tour.
+1. LE TRACEUR POSE LA PISTE
+« Poser une piste » enregistre son parcours avec le GPS du téléphone, jusqu'à la cachette.
 
-DEUX FAÇONS D'ENREGISTRER LA TRACE
-• Avec le collier GPS Tractive du chien (compte Tractive) : le mode LIVE est activé automatiquement pendant la piste, la trace du collier est récupérée à l'arrivée
+2. LE CHIEN TRAVAILLE
+Après le temps de vieillissement, « Démarrer une recherche » : choisissez la piste, l'application enregistre la trace du chien. La piste reste masquée pendant la recherche, pour ne pas influencer le maître-chien.
+
+3. LE BILAN
+À l'arrivée, la piste (bleu) et la trace du chien (orange) s'affichent sur la carte, avec l'âge de la piste, l'écart moyen et maximal du chien, la part de la piste couverte et si l'arrivée a été atteinte. Vous voyez où il a travaillé, où il a dépassé un virage, où il a coupé.
+
+DEUX FAÇONS D'ENREGISTRER LA TRACE DU CHIEN
+• Avec son collier GPS Tractive (compte Tractive) : le mode LIVE est activé automatiquement pendant la recherche
 • Avec le GPS du téléphone du maître-chien, à quelques mètres du chien au bout de la longe : une position par seconde, même écran éteint
 
 FONCTIONNALITÉS
-• Mes pistes : toutes vos pistes enregistrées sur le téléphone, à revoir sur la carte
+• Mes pistes : pistes posées et recherches, enregistrées sur le téléphone, à revoir sur la carte
 • Fonds de carte IGN (plan et photos aériennes) et OpenStreetMap
-• Bilan de chaque piste : distance, durée, fréquence des positions, précision GPS
+• Distance, durée, fréquence et précision des positions
 • Trace du collier sur une période libre, pour une sortie qui n'a pas été enregistrée
 • Séance de démonstration pour découvrir l'application
 
 VOS DONNÉES
-La position du téléphone n'est lue que pendant une piste que vous avez démarrée, avec une notification affichée. Vos pistes restent sur votre téléphone. Votre mot de passe Tractive n'est jamais enregistré : seul un jeton de connexion est conservé. Aucune donnée n'est envoyée au développeur. Pas de publicité, pas de suivi d'audience.
+La position du téléphone n'est lue que pendant une pose de piste ou une recherche que vous avez démarrée, avec une notification affichée. Tout reste sur votre téléphone. Votre mot de passe Tractive n'est jamais enregistré : seul un jeton de connexion est conservé. Aucune donnée n'est envoyée au développeur. Pas de publicité, pas de suivi d'audience.
 
 EN PRÉPARATION
-Enregistrement de la piste du traceur, superposition avec la trace du chien et mesure des écarts.
+Partage d'une piste entre le téléphone du traceur et celui du maître-chien.
 
 Mantrailing est une application indépendante, ni affiliée à Tractive, ni approuvée par Tractive. Un abonnement Tractive actif est nécessaire pour utiliser le collier.
 
@@ -49,10 +56,10 @@ Choisir « Tout ou partie des fonctionnalités sont limitées », puis ajouter d
 ## Autorisations de service au premier plan (Play Console > Contenu de l'application)
 
 Type « Localisation » (FOREGROUND_SERVICE_LOCATION) :
-- Description : « L'utilisateur démarre l'enregistrement d'une piste de mantrailing (pistage par un chien) ;
-  l'application enregistre la position GPS du téléphone du maître-chien jusqu'à ce qu'il appuie sur « Terminer
-  la piste ». L'enregistrement doit continuer écran éteint pendant toute la recherche, qui dure de quelques
-  minutes à une heure. Une notification reste affichée pendant tout l'enregistrement. »
+- Description : « L'utilisateur démarre un enregistrement de mantrailing (pistage par un chien) : la pose de la
+  piste par le traceur, ou la recherche du chien. L'application enregistre la position GPS du téléphone jusqu'à ce
+  que l'utilisateur appuie sur « Terminer ». L'enregistrement doit continuer écran éteint pendant toute la séance,
+  qui dure de quelques minutes à une heure. Une notification reste affichée pendant tout l'enregistrement. »
 - Vidéo : démarrer une piste, montrer la notification, écran éteint, terminer la piste (lien YouTube non répertorié).
 
 ## Visuels

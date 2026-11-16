@@ -8,6 +8,9 @@ import app.mantrailing.data.StoredSession
 import app.mantrailing.demo.DemoSession
 import app.mantrailing.recording.PhoneRecordingService
 import app.mantrailing.session.ActiveRecording
+import app.mantrailing.session.LaidTrail
+import app.mantrailing.session.LaidTrailRepository
+import app.mantrailing.session.RecordingKind
 import app.mantrailing.session.SessionRepository
 import app.mantrailing.session.TrackSource
 import app.mantrailing.session.TrailSession
@@ -72,8 +75,14 @@ data class UiState(
     val recordingPoints: Int = 0,
     /** Pistes enregistrées, la plus récente d'abord. */
     val sessions: List<TrailSession> = emptyList(),
-    /** Piste enregistrée affichée sur la carte. */
+    /** Recherche enregistrée affichée sur la carte. */
     val openedSession: TrailSession? = null,
+    /** Pistes posées par le traceur, la plus récente d'abord. */
+    val trails: List<LaidTrail> = emptyList(),
+    /** Piste posée affichée seule sur la carte (avant la recherche). */
+    val openedTrail: LaidTrail? = null,
+    /** Piste du traceur dessinée sur la carte (avec ou sans trace du chien). */
+    val trailLine: List<Position> = emptyList(),
 ) {
     val connected get() = stored?.pet != null
     val dogName get() = stored?.pet?.name ?: "Mon chien"
@@ -83,6 +92,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = SessionStore(app)
     private val api = TractiveApi()
     private val repository = SessionRepository(File(app.filesDir, "sessions"))
+    private val trailRepository = LaidTrailRepository(File(app.filesDir, "trails"))
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -91,15 +101,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val stored = store.session.first()
             val recording = store.activeRecording.first()
             val sessions = withContext(Dispatchers.IO) { repository.list() }
+            val trails = withContext(Dispatchers.IO) { trailRepository.list() }
             _state.update {
-                it.copy(ready = true, stored = stored, trackSource = store.trackSource.first(), recording = recording, sessions = sessions)
+                it.copy(
+                    ready = true, stored = stored, trackSource = store.trackSource.first(),
+                    recording = recording, sessions = sessions, trails = trails,
+                )
             }
             if (stored != null && stored.pet == null) loadPets()
-            // Appli relancée pendant une piste au GPS du téléphone : on reprend l'enregistrement.
+            // Appli relancée pendant un enregistrement au GPS du téléphone : on le reprend.
             if (recording?.source == TrackSource.PHONE && !PhoneRecordingService.running.value &&
                 PhoneRecordingService.hasLocationPermission(getApplication())
             ) {
-                PhoneRecordingService.start(getApplication())
+                PhoneRecordingService.start(getApplication(), layingTrail = recording.kind == RecordingKind.TRAIL)
             }
         }
         viewModelScope.launch {
@@ -123,16 +137,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(
             demo = true,
             openedSession = null,
+            openedTrail = null,
             range = DemoSession.range,
             segments = DemoSession.segments,
             stats = TrackStats.of(DemoSession.segments),
+            trailLine = DemoSession.trail,
             loadedOnce = true,
             message = null,
         )
     }
 
     fun exitDemo() = _state.update {
-        it.copy(demo = false, range = TimeRange.lastHours(3), segments = emptyList(), stats = null, loadedOnce = false, message = null)
+        it.copy(
+            demo = false, range = TimeRange.lastHours(3), segments = emptyList(), stats = null,
+            trailLine = emptyList(), loadedOnce = false, message = null,
+        )
     }
 
     fun loadPets() = run { fetchPets() }
@@ -169,6 +188,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update {
             it.copy(
                 openedSession = null,
+                openedTrail = null,
+                trailLine = emptyList(),
                 segments = segments,
                 stats = TrackStats.of(segments),
                 loadedOnce = true,
@@ -188,7 +209,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---------- Enregistrement d'une piste ----------
+    // ---------- Enregistrement : pose de la piste et recherche ----------
 
     fun setTrackSource(source: TrackSource) {
         viewModelScope.launch {
@@ -197,18 +218,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Le traceur pose la piste : son parcours est enregistré au GPS du téléphone (autorisation déjà accordée). */
+    fun startTrailLaying() = run {
+        if (_state.value.recording != null) return@run
+        val recording = ActiveRecording(
+            UUID.randomUUID().toString(), _state.value.dogName, TrackSource.PHONE, Instant.now().epochSecond, RecordingKind.TRAIL,
+        )
+        withContext(Dispatchers.IO) { PhoneRecordingService.bufferOf(getApplication()).clear() }
+        PhoneRecordingService.start(getApplication(), layingTrail = true)
+        store.saveActiveRecording(recording)
+        _state.update { it.copy(recording = recording).clearedDisplay() }
+    }
+
     /**
-     * Démarre une piste. Pour le GPS du téléphone, l'autorisation de localisation doit déjà être accordée.
-     * [remember] : enregistre [source] comme choix pour les pistes suivantes.
+     * Démarre la recherche du chien. Pour le GPS du téléphone, l'autorisation de localisation doit déjà être accordée.
+     * [remember] : enregistre [source] comme choix pour les recherches suivantes.
+     * [trailId] : piste posée que le chien va suivre.
      */
-    fun startRecording(source: TrackSource, remember: Boolean = false) = run {
+    fun startRecording(source: TrackSource, remember: Boolean = false, trailId: String? = null) = run {
         if (_state.value.recording != null) return@run
         if (remember) {
             store.saveTrackSource(source)
             _state.update { it.copy(trackSource = source) }
         }
         val s = _state.value
-        val recording = ActiveRecording(UUID.randomUUID().toString(), s.dogName, source, Instant.now().epochSecond)
+        val recording = ActiveRecording(
+            UUID.randomUUID().toString(), s.dogName, source, Instant.now().epochSecond, RecordingKind.SEARCH, trailId,
+        )
         var message: String? = null
         when (source) {
             TrackSource.PHONE -> {
@@ -221,24 +257,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // Sans le mode LIVE, le collier n'envoie qu'un point toutes les quelques minutes.
                 message = try {
                     api.setLiveTracking(session, tracker, true)
-                    "Piste démarrée, mode LIVE demandé au collier."
+                    "Recherche démarrée, mode LIVE demandé au collier."
                 } catch (e: TractiveAuthException) {
                     throw e
                 } catch (e: Exception) {
-                    "Piste démarrée, mais le mode LIVE n'a pas pu être activé : active-le dans l'appli Tractive."
+                    "Recherche démarrée, mais le mode LIVE n'a pas pu être activé : active-le dans l'appli Tractive."
                 }
             }
         }
         store.saveActiveRecording(recording)
-        _state.update {
-            it.copy(recording = recording, demo = false, openedSession = null, segments = emptyList(), stats = null, message = message)
+        _state.update { it.copy(recording = recording, message = message).clearedDisplay() }
+    }
+
+    /** Termine l'enregistrement en cours : pose de la piste ou recherche du chien. */
+    fun stopRecording() = run {
+        val recording = _state.value.recording ?: return@run
+        when (recording.kind) {
+            RecordingKind.TRAIL -> finishTrail(recording)
+            RecordingKind.SEARCH -> finishSearch(recording)
         }
     }
 
-    /** Termine la piste en cours, récupère la trace du chien et l'enregistre dans « Mes pistes ». */
-    fun stopRecording() = run {
-        val s = _state.value
-        val recording = s.recording ?: return@run
+    private suspend fun finishTrail(recording: ActiveRecording) {
+        val endedAt = Instant.now().epochSecond
+        val points = withContext(Dispatchers.IO) { PhoneRecordingService.stop(getApplication()) }
+        store.saveActiveRecording(null)
+        if (points.isEmpty()) {
+            _state.update { it.copy(recording = null, message = "Aucune position GPS enregistrée : la piste n'a pas été gardée.") }
+            return
+        }
+        val trail = LaidTrail(recording.id, recording.startedAt, endedAt, points)
+        withContext(Dispatchers.IO) { trailRepository.save(trail) }
+        _state.update {
+            it.copy(
+                recording = null,
+                trails = listOf(trail) + it.trails.filter { old -> old.id != trail.id },
+                message = "Piste enregistrée. Laisse-la vieillir, puis lance la recherche.",
+            )
+        }
+        showTrail(trail)
+    }
+
+    private suspend fun finishSearch(recording: ActiveRecording) {
         val endedAt = Instant.now().epochSecond
         var message: String? = null
         val segments: List<List<Position>> = when (recording.source) {
@@ -248,11 +308,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 listOf(points).filter { it.isNotEmpty() }
             }
             TrackSource.TRACTIVE -> fetchCollarTrack(recording.startedAt, endedAt).also { segs ->
-                if (segs.isEmpty()) message = "Trace du collier pas encore disponible : rouvre la piste un peu plus tard depuis « Mes pistes »."
+                if (segs.isEmpty()) message = "Trace du collier pas encore disponible : rouvre la recherche un peu plus tard depuis « Mes pistes »."
                 stopLiveQuietly()
             }
         }
-        val session = TrailSession(recording.id, recording.dogName, recording.source, recording.startedAt, endedAt, segments)
+        val trail = recording.trailId?.let { id ->
+            _state.value.trails.find { it.id == id } ?: withContext(Dispatchers.IO) { trailRepository.load(id) }
+        }
+        val session = TrailSession(
+            recording.id, recording.dogName, recording.source, recording.startedAt, endedAt, segments,
+            trailId = trail?.id, trail = trail?.points.orEmpty(), trailEndedAt = trail?.endedAt,
+        )
         withContext(Dispatchers.IO) { repository.save(session) }
         store.saveActiveRecording(null)
         _state.update {
@@ -265,7 +331,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         showSession(session)
     }
 
-    /** Positions du collier pendant la piste (avec une marge d'une minute avant le départ). Vide en cas d'échec réseau. */
+    /** Positions du collier pendant la recherche (avec une marge d'une minute). Vide en cas d'échec réseau. */
     private suspend fun fetchCollarTrack(startedAt: Long, endedAt: Long): List<List<Position>> {
         val s = _state.value
         val session = s.stored?.session ?: return emptyList()
@@ -290,11 +356,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openSession(session: TrailSession) = run {
         showSession(session)
-        // Piste au collier enregistrée avant que Tractive ait transmis les positions : nouvel essai.
+        // Recherche au collier enregistrée avant que Tractive ait transmis les positions : nouvel essai.
         if (session.source == TrackSource.TRACTIVE && session.segments.isEmpty() && _state.value.connected) {
             val segments = fetchCollarTrack(session.startedAt, session.endedAt)
             if (segments.isEmpty()) {
-                _state.update { it.copy(message = "Le collier n'a toujours pas transmis de positions pour cette piste.") }
+                _state.update { it.copy(message = "Le collier n'a toujours pas transmis de positions pour cette recherche.") }
             } else {
                 val updated = session.copy(segments = segments)
                 withContext(Dispatchers.IO) { repository.save(updated) }
@@ -305,10 +371,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun showSession(session: TrailSession) = _state.update {
-        it.copy(openedSession = session, demo = false, segments = session.segments, stats = TrackStats.of(session.segments), loadedOnce = true)
+        it.copy(
+            openedSession = session, openedTrail = null, demo = false, segments = session.segments,
+            stats = TrackStats.of(session.segments), trailLine = session.trail, loadedOnce = true,
+        )
     }
 
-    fun closeSession() = _state.update { it.copy(openedSession = null, segments = emptyList(), stats = null, loadedOnce = false) }
+    fun openTrail(trail: LaidTrail) = showTrail(trail)
+
+    private fun showTrail(trail: LaidTrail) = _state.update {
+        it.copy(
+            openedTrail = trail, openedSession = null, demo = false, segments = emptyList(),
+            stats = null, trailLine = trail.points, loadedOnce = true,
+        )
+    }
+
+    fun closeSession() = _state.update { it.clearedDisplay() }
+
+    /** Plus rien d'affiché sur la carte. */
+    private fun UiState.clearedDisplay() = copy(
+        demo = false, openedSession = null, openedTrail = null, segments = emptyList(), stats = null,
+        trailLine = emptyList(), loadedOnce = false,
+    )
+
+    fun deleteTrail(trail: LaidTrail) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { trailRepository.delete(trail.id) }
+            _state.update { s ->
+                val updated = s.copy(trails = s.trails.filter { it.id != trail.id })
+                if (s.openedTrail?.id == trail.id) updated.clearedDisplay() else updated
+            }
+        }
+    }
 
     fun deleteSession(session: TrailSession) {
         viewModelScope.launch {

@@ -43,8 +43,12 @@ import androidx.compose.ui.unit.dp
 import app.mantrailing.TimeRange
 import app.mantrailing.UiState
 import app.mantrailing.demo.DemoSession
+import app.mantrailing.session.LaidTrail
+import app.mantrailing.session.RecordingKind
 import app.mantrailing.session.TrackSource
 import app.mantrailing.track.TrackStats
+import app.mantrailing.track.TrailDeviation
+import app.mantrailing.track.distanceMeters
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
@@ -65,13 +69,18 @@ data class TrackActions(
     val onStartDemo: () -> Unit = {},
     val onExitDemo: () -> Unit = {},
     val onDismissMessage: () -> Unit = {},
+    /** Démarrer la recherche du chien. */
     val onStartRecording: () -> Unit = {},
+    /** Le traceur commence à poser la piste. */
+    val onLayTrail: () -> Unit = {},
+    /** Démarrer la recherche directement sur la piste affichée. */
+    val onStartSearchOnTrail: (LaidTrail) -> Unit = {},
     val onStopRecording: () -> Unit = {},
     val onOpenSessions: () -> Unit = {},
     val onCloseSession: () -> Unit = {},
 )
 
-/** Écran d'accueil : la carte, le démarrage d'une piste, la piste en cours ou une piste enregistrée. */
+/** Écran d'accueil : la carte, la pose d'une piste, la recherche en cours, ou une piste / recherche enregistrée. */
 @Composable
 fun TrackScreen(state: UiState, actions: TrackActions) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -79,6 +88,7 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
     val title = when {
         state.demo -> "${DemoSession.DOG_NAME} (démo)"
         state.openedSession != null -> state.openedSession.dogName
+        state.openedTrail != null -> "Piste posée"
         else -> state.stored?.pet?.name ?: "Mantrailing"
     }
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -110,16 +120,33 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
             }
             when {
                 state.recording != null -> RecordingBanner(state, actions.onStopRecording)
-                state.demo -> InfoBar("Séance de démonstration : données fictives.", "Quitter", actions.onExitDemo)
+                state.demo -> InfoBar(
+                    "Séance de démonstration : données fictives. Piste de ${formatDuration(DemoSession.segments.first().first().time - DemoSession.trailEndedAt)}.",
+                    "Quitter" to actions.onExitDemo,
+                )
                 state.openedSession != null -> InfoBar(
-                    "Piste du ${formatSessionDate(state.openedSession.startedAt)} · ${sourceLabel(state.openedSession.source)}",
-                    "Fermer", actions.onCloseSession,
+                    buildString {
+                        append("Recherche du ${formatSessionDate(state.openedSession.startedAt)} · ${sourceLabel(state.openedSession.source)}")
+                        state.openedSession.trailAgeSeconds?.let { append(" · piste de ${formatDuration(it)}") }
+                    },
+                    "Fermer" to actions.onCloseSession,
+                )
+                state.openedTrail != null -> InfoBar(
+                    "Piste posée le ${formatSessionDate(state.openedTrail.startedAt)}",
+                    "Lancer la recherche" to { actions.onStartSearchOnTrail(state.openedTrail) },
+                    "Fermer" to actions.onCloseSession,
                 )
                 else -> {
-                    Button(
-                        onClick = actions.onStartRecording, enabled = !state.busy,
-                        modifier = Modifier.fillMaxWidth().testTag("record"),
-                    ) { Text("Démarrer une piste") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = actions.onLayTrail, enabled = !state.busy,
+                            modifier = Modifier.weight(1f).testTag("lay"),
+                        ) { Text("Poser une piste") }
+                        Button(
+                            onClick = actions.onStartRecording, enabled = !state.busy,
+                            modifier = Modifier.weight(1f).testTag("record"),
+                        ) { Text("Démarrer une recherche") }
+                    }
                     if (state.connected && showPeriod) {
                         RangePicker(state.range, actions.onRangeChange)
                         OutlinedButton(
@@ -133,8 +160,8 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            TrackMap(state.segments, Modifier.fillMaxSize())
-            val idle = !state.demo && state.recording == null && state.openedSession == null && state.segments.isEmpty()
+            TrackMap(state.segments, Modifier.fillMaxSize(), trail = state.trailLine)
+            val idle = !state.demo && state.recording == null && state.openedSession == null && state.openedTrail == null && state.segments.isEmpty()
             if (!state.connected && idle) Welcome(state, actions, Modifier.align(Alignment.Center))
             state.message?.let { msg ->
                 Surface(
@@ -145,16 +172,22 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
                 ) { Text(msg, Modifier.padding(12.dp), color = MaterialTheme.colorScheme.inverseOnSurface) }
             }
         }
-        state.stats?.takeIf { it.pointCount > 0 }?.let { StatsPanel(it) }
+        val deviation = remember(state.trailLine, state.segments) { TrailDeviation.of(state.trailLine, state.segments.flatten()) }
+        when {
+            state.stats != null && state.stats.pointCount > 0 -> StatsPanel(state.stats, deviation)
+            state.openedTrail != null -> TrailPanel(state.openedTrail)
+        }
     }
 }
 
 @Composable
-private fun InfoBar(text: String, action: String, onAction: () -> Unit) {
+private fun InfoBar(text: String, vararg actions: Pair<String, () -> Unit>) {
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium) {
-        Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = onAction) { Text(action) }
+        Column(Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp)) {
+            Text(text, Modifier.padding(end = 12.dp), style = MaterialTheme.typography.bodyMedium)
+            Row(Modifier.align(Alignment.End)) {
+                actions.forEach { (label, onClick) -> TextButton(onClick = onClick) { Text(label) } }
+            }
         }
     }
 }
@@ -169,24 +202,36 @@ private fun RecordingBanner(state: UiState, onStop: () -> Unit) {
             delay(1_000)
         }
     }
+    val laying = recording.kind == RecordingKind.TRAIL
+    val elapsed = formatDuration((now - recording.startedAt).coerceAtLeast(0))
     Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.testTag("recording")) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Piste en cours · ${formatDuration((now - recording.startedAt).coerceAtLeast(0))}", style = MaterialTheme.typography.titleMedium)
+            Text(if (laying) "Pose de la piste · $elapsed" else "Recherche en cours · $elapsed", style = MaterialTheme.typography.titleMedium)
             Text(
-                when (recording.source) {
-                    TrackSource.PHONE -> "GPS du téléphone · ${state.recordingPoints} positions"
-                    TrackSource.TRACTIVE -> "Collier Tractive (mode LIVE) · trace récupérée à l'arrivée"
+                when {
+                    laying -> "Parcours du traceur au GPS du téléphone · ${state.recordingPoints} positions"
+                    recording.source == TrackSource.PHONE -> "GPS du téléphone · ${state.recordingPoints} positions"
+                    else -> "Collier Tractive (mode LIVE) · trace récupérée à l'arrivée"
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )
+            if (!laying) {
+                val trail = recording.trailId?.let { id -> state.trails.find { it.id == id } }
+                Text(
+                    trail?.let { "Sur la piste posée il y a ${formatDuration((recording.startedAt - it.endedAt).coerceAtLeast(0))} (affichée à l'arrivée)" }
+                        ?: "Sans piste enregistrée",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Button(onClick = onStop, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
-                if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Terminer la piste")
+                if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                else Text(if (laying) "Terminer la pose" else "Terminer la recherche")
             }
         }
     }
 }
 
-/** Première piste avec un collier connecté : on propose le collier, le choix est gardé. */
+/** Première recherche avec un collier connecté : on propose le collier, le choix est gardé. */
 @Composable
 fun SourceChoiceDialog(onChoose: (TrackSource) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
@@ -194,14 +239,54 @@ fun SourceChoiceDialog(onChoose: (TrackSource) -> Unit, onDismiss: () -> Unit) {
         title = { Text("Trace du chien") },
         text = {
             Text(
-                "Le collier Tractive du chien donne la trace la plus fidèle : le mode LIVE sera activé pendant la piste. " +
+                "Le collier Tractive du chien donne la trace la plus fidèle : le mode LIVE sera activé pendant la recherche. " +
                     "Sinon, la trace est prise par le GPS de ce téléphone, porté par le maître-chien.\n\n" +
-                    "Ce choix sera gardé pour les prochaines pistes ; il se change dans les paramètres.",
+                    "Ce choix sera gardé pour les prochaines recherches ; il se change dans les paramètres.",
             )
         },
         confirmButton = { Button(onClick = { onChoose(TrackSource.TRACTIVE) }) { Text("Collier Tractive") } },
         dismissButton = { TextButton(onClick = { onChoose(TrackSource.PHONE) }) { Text("GPS du téléphone") } },
     )
+}
+
+/** Au départ d'une recherche : quelle piste posée le chien va-t-il suivre ? */
+@Composable
+fun TrailChoiceDialog(trails: List<LaidTrail>, now: Long, onChoose: (LaidTrail?) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Quelle piste ?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("La piste ne sera affichée qu'à l'arrivée du chien.", style = MaterialTheme.typography.bodySmall)
+                trails.forEach { trail ->
+                    OutlinedButton(onClick = { onChoose(trail) }, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text("Posée il y a ${formatDuration((now - trail.endedAt).coerceAtLeast(0))}")
+                            Text(
+                                "%.2f km · %s".format(Locale.FRENCH, trailLength(trail) / 1000, formatSessionDate(trail.startedAt)),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onChoose(null) }) { Text("Sans piste") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
+}
+
+fun trailLength(trail: LaidTrail) = trail.points.zipWithNext { a, b -> distanceMeters(a, b) }.sum()
+
+@Composable
+private fun TrailPanel(trail: LaidTrail) {
+    Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth().testTag("trail-stats")) {
+        Row(Modifier.padding(12.dp)) {
+            Stat("Longueur", "%.2f km".format(Locale.FRENCH, trailLength(trail) / 1000), Modifier.weight(1f))
+            Stat("Pose", formatDuration(trail.endedAt - trail.startedAt), Modifier.weight(1f))
+            Stat("Points", "${trail.points.size}", Modifier.weight(1f))
+        }
+    }
 }
 
 fun sourceLabel(source: TrackSource) = when (source) {
@@ -221,8 +306,8 @@ private fun Welcome(state: UiState, actions: TrackActions, modifier: Modifier) {
             Text("Bienvenue !", style = MaterialTheme.typography.titleLarge)
             Text(
                 if (state.stored == null) {
-                    "« Démarrer une piste » enregistre la trace avec le GPS du téléphone. " +
-                        "Pour utiliser le collier GPS du chien, connectez votre compte Tractive."
+                    "Le traceur enregistre son parcours avec « Poser une piste ». « Démarrer une recherche » enregistre " +
+                        "ensuite la trace du chien avec le GPS du téléphone, ou avec son collier si vous connectez votre compte Tractive."
                 } else {
                     "Choisissez votre chien dans les paramètres."
                 },
@@ -294,13 +379,26 @@ private fun RangePicker(range: TimeRange, onChange: (TimeRange) -> Unit) {
 }
 
 @Composable
-private fun StatsPanel(stats: TrackStats) {
+private fun StatsPanel(stats: TrackStats, deviation: TrailDeviation?) {
     Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth().testTag("stats")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth()) {
                 Stat("Distance", "%.2f km".format(Locale.FRENCH, stats.distanceMeters / 1000), Modifier.weight(1f))
                 Stat("Durée", formatDuration(stats.durationSeconds), Modifier.weight(1f))
                 Stat("Points", "${stats.pointCount}", Modifier.weight(1f))
+            }
+            if (deviation != null) {
+                // Comparaison avec la piste du traceur : c'est ce qui intéresse le maître-chien.
+                Row(Modifier.fillMaxWidth().testTag("deviation")) {
+                    Stat("Écart moyen", "%.0f m".format(deviation.meanMeters), Modifier.weight(1f))
+                    Stat("Écart max", "%.0f m".format(deviation.maxMeters), Modifier.weight(1f))
+                    Stat("Sur la piste", "%.0f %%".format(deviation.onTrailShare * 100), Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth()) {
+                    Stat("Piste couverte", "%.0f %%".format(deviation.coverage * 100), Modifier.weight(1f))
+                    Stat("Arrivée", if (deviation.reachedEnd) "Atteinte" else "Pas atteinte", Modifier.weight(2f))
+                }
+                return@Column
             }
             Row(Modifier.fillMaxWidth()) {
                 Stat("1 point toutes les", stats.medianIntervalSeconds?.let { formatDuration(it) } ?: "–", Modifier.weight(1f))

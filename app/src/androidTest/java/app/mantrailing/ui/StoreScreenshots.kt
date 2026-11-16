@@ -15,6 +15,8 @@ import app.mantrailing.MantrailingTheme
 import app.mantrailing.UiState
 import app.mantrailing.data.StoredSession
 import app.mantrailing.demo.DemoSession
+import app.mantrailing.session.TrackSource
+import app.mantrailing.session.TrailSession
 import app.mantrailing.track.TrackStats
 import app.mantrailing.tractive.Pet
 import app.mantrailing.tractive.Session
@@ -38,14 +40,19 @@ class StoreScreenshots {
     fun captures() {
         assumeTrue(InstrumentationRegistry.getArguments().getString("storeScreenshots") == "true")
 
-        // Séance de démonstration présentée comme une vraie séance (sans bandeau « démo »).
+        // Séance de démonstration présentée comme une vraie recherche sur une piste posée (sans bandeau « démo »).
         val segments = DemoSession.segments
+        val session = TrailSession(
+            "demo", DemoSession.DOG_NAME, TrackSource.PHONE, segments.first().first().time, segments.last().last().time, segments,
+            trailId = "demo-trail", trail = DemoSession.trail, trailEndedAt = DemoSession.trailEndedAt,
+        )
         val state = UiState(
             ready = true,
             stored = StoredSession(Session("demo", "demo", 0), Pet("demo", DemoSession.DOG_NAME, "DEMO")),
-            range = DemoSession.range,
+            openedSession = session,
             segments = segments,
             stats = TrackStats.of(segments),
+            trailLine = session.trail,
             loadedOnce = true,
         )
         rule.setContent {
@@ -67,7 +74,7 @@ class StoreScreenshots {
 
     private fun waitForTiles() {
         rule.waitForIdle()
-        Thread.sleep(8_000) // MapLibre charge les tuiles hors de Compose : pas d'état « idle » à attendre.
+        Thread.sleep(12_000) // MapLibre charge les tuiles hors de Compose : pas d'état « idle » à attendre.
     }
 
     /** Capture prise par le shell, dans /data/local/tmp : elle survit à la désinstallation de l'appli par Gradle. */

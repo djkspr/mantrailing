@@ -1,6 +1,7 @@
 package app.mantrailing.ui
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -17,6 +18,8 @@ import app.mantrailing.UiState
 import app.mantrailing.data.StoredSession
 import app.mantrailing.demo.DemoSession
 import app.mantrailing.session.ActiveRecording
+import app.mantrailing.session.LaidTrail
+import app.mantrailing.session.RecordingKind
 import app.mantrailing.session.TrackSource
 import app.mantrailing.session.TrailSession
 import app.mantrailing.track.TrackStats
@@ -77,18 +80,133 @@ class ScreensTest {
         var exit = 0
         val state = UiState(
             ready = true, demo = true, range = DemoSession.range,
-            segments = DemoSession.segments, stats = TrackStats.of(DemoSession.segments),
+            segments = DemoSession.segments, stats = TrackStats.of(DemoSession.segments), trailLine = DemoSession.trail,
         )
         rule.setContent { MaterialTheme { TrackScreen(state, TrackActions(onExitDemo = { exit++ })) } }
 
         rule.onNodeWithText("Rex (démo)").assertIsDisplayed()
-        rule.onNodeWithText("Séance de démonstration : données fictives.").assertIsDisplayed()
+        rule.onNodeWithText("Séance de démonstration : données fictives. Piste de 45 min.").assertIsDisplayed()
         rule.onNodeWithTag("welcome").assertDoesNotExist()
         rule.onNodeWithText("Activer LIVE").assertDoesNotExist()
         rule.onNodeWithTag("stats").assertIsDisplayed()
+        // La démo montre la comparaison avec la piste du traceur.
+        rule.onNodeWithTag("deviation").assertIsDisplayed()
+        rule.onNodeWithText("Atteinte").assertIsDisplayed()
         rule.onNodeWithText("Quitter").performClick()
 
         assertEquals(1, exit)
+    }
+
+    // --- Piste du traceur ---
+
+    @Test
+    fun accueil_poser_une_piste() {
+        var lays = 0
+        rule.setContent { MaterialTheme { TrackScreen(UiState(ready = true), TrackActions(onLayTrail = { lays++ })) } }
+
+        rule.onNodeWithTag("lay").assertIsEnabled().performClick()
+
+        assertEquals(1, lays)
+    }
+
+    @Test
+    fun pose_de_piste_en_cours() {
+        var stops = 0
+        val recording = ActiveRecording("t1", "Rex", TrackSource.PHONE, Instant.now().epochSecond - 30, RecordingKind.TRAIL)
+        rule.setContent {
+            MaterialTheme { TrackScreen(UiState(ready = true, recording = recording, recordingPoints = 12), TrackActions(onStopRecording = { stops++ })) }
+        }
+
+        rule.onNodeWithText("Pose de la piste", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Parcours du traceur au GPS du téléphone · 12 positions").assertIsDisplayed()
+        rule.onNodeWithTag("lay").assertDoesNotExist()
+        rule.onNodeWithText("Terminer la pose").performClick()
+
+        assertEquals(1, stops)
+    }
+
+    private val laidTrail = LaidTrail(
+        "t1", 1_794_830_000, 1_794_830_300,
+        (0..30).map { Position(1_794_830_000L + it * 10, 48.4254 + it * 0.0001, 2.6402) },
+    )
+
+    @Test
+    fun recherche_en_cours_sur_une_piste_posee() {
+        val now = Instant.now().epochSecond
+        val trail = laidTrail.copy(endedAt = now - 1800)
+        val recording = ActiveRecording("r1", "Rex", TrackSource.PHONE, now, RecordingKind.SEARCH, trailId = trail.id)
+        rule.setContent { MaterialTheme { TrackScreen(UiState(ready = true, recording = recording, trails = listOf(trail)), TrackActions()) } }
+
+        rule.onNodeWithText("Sur la piste posée il y a 30 min (affichée à l'arrivée)").assertIsDisplayed()
+    }
+
+    @Test
+    fun piste_posee_affichee_puis_recherche_lancee() {
+        var started: LaidTrail? = null
+        val state = UiState(ready = true, openedTrail = laidTrail, trailLine = laidTrail.points)
+        rule.setContent { MaterialTheme { TrackScreen(state, TrackActions(onStartSearchOnTrail = { started = it })) } }
+
+        rule.onNodeWithText("Piste posée").assertIsDisplayed()
+        rule.onNodeWithTag("trail-stats").assertIsDisplayed()
+        rule.onNodeWithText("0,33 km").assertIsDisplayed()
+        rule.onNodeWithText("Lancer la recherche").performClick()
+
+        assertEquals(laidTrail, started)
+    }
+
+    @Test
+    fun choix_de_la_piste_au_depart_de_la_recherche() {
+        val chosen = mutableListOf<LaidTrail?>()
+        rule.setContent {
+            MaterialTheme { TrailChoiceDialog(listOf(laidTrail), now = laidTrail.endedAt + 2700, onChoose = { chosen += it }, onDismiss = {}) }
+        }
+
+        rule.onNodeWithText("La piste ne sera affichée qu'à l'arrivée du chien.").assertIsDisplayed()
+        rule.onNodeWithText("Posée il y a 45 min").performClick()
+        rule.onNodeWithText("Sans piste").performClick()
+
+        assertEquals(listOf(laidTrail, null), chosen)
+    }
+
+    @Test
+    fun recherche_comparee_a_la_piste() {
+        val dog = laidTrail.points.map { it.copy(lon = it.lon + 0.0001) } // ~7 m à l'est de la piste
+        val session = TrailSession(
+            "s1", "Rex", TrackSource.PHONE, laidTrail.endedAt + 2700, laidTrail.endedAt + 3300, listOf(dog),
+            trailId = laidTrail.id, trail = laidTrail.points, trailEndedAt = laidTrail.endedAt,
+        )
+        val state = UiState(ready = true, openedSession = session, segments = session.segments, stats = TrackStats.of(session.segments), trailLine = session.trail)
+        rule.setContent { MaterialTheme { TrackScreen(state, TrackActions()) } }
+
+        rule.onNodeWithText("piste de 45 min", substring = true).assertIsDisplayed()
+        rule.onNodeWithTag("deviation").assertIsDisplayed()
+        rule.onAllNodesWithText("7 m").assertCountEquals(2) // écart moyen et écart max
+        rule.onAllNodesWithText("100 %").assertCountEquals(2) // sur la piste et piste couverte
+        rule.onNodeWithText("Atteinte").assertIsDisplayed()
+    }
+
+    @Test
+    fun mes_pistes_avec_pistes_posees() {
+        var opened: LaidTrail? = null
+        val deleted = mutableListOf<String>()
+        val searched = TrailSession("s1", "Rex", TrackSource.PHONE, 1_794_840_000, 1_794_840_600, trailId = "autre")
+        val other = laidTrail.copy(id = "autre", startedAt = 1_794_820_000, endedAt = 1_794_820_300)
+        rule.setContent {
+            MaterialTheme {
+                SessionsScreen(listOf(searched), listOf(laidTrail, other), SessionsActions(onOpenTrail = { opened = it }, onDeleteTrail = { deleted += it.id }))
+            }
+        }
+
+        rule.onNodeWithText("Pistes posées").assertIsDisplayed()
+        rule.onNodeWithText("Recherches").assertIsDisplayed()
+        rule.onNodeWithText("Pas encore travaillée").assertIsDisplayed()
+        rule.onNodeWithText("Piste travaillée").assertIsDisplayed()
+        rule.onNodeWithTag("trail-t1").performClick()
+        rule.onAllNodesWithText("Supprimer")[0].performClick()
+        rule.onNodeWithText("Supprimer définitivement").performClick()
+
+        assertEquals(laidTrail, opened)
+        assertEquals(listOf("t1"), deleted)
     }
 
     // --- Accueil connecté ---
@@ -182,11 +300,12 @@ class ScreensTest {
         val state = UiState(ready = true, recording = recording, recordingPoints = 42)
         rule.setContent { MaterialTheme { TrackScreen(state, TrackActions(onStopRecording = { stops++ })) } }
 
-        rule.onNodeWithText("Piste en cours", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Recherche en cours", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Sans piste enregistrée").assertIsDisplayed()
         rule.onNodeWithText("GPS du téléphone · 42 positions").assertIsDisplayed()
         rule.onNodeWithTag("record").assertDoesNotExist()
         rule.onNodeWithTag("welcome").assertDoesNotExist()
-        rule.onNodeWithText("Terminer la piste").performClick()
+        rule.onNodeWithText("Terminer la recherche").performClick()
 
         assertEquals(1, stops)
     }
@@ -222,7 +341,7 @@ class ScreensTest {
         val state = UiState(ready = true, openedSession = session, segments = session.segments, stats = TrackStats.of(session.segments))
         rule.setContent { MaterialTheme { TrackScreen(state, TrackActions(onCloseSession = { closes++ })) } }
 
-        rule.onNodeWithText("Piste du", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Recherche du", substring = true).assertIsDisplayed()
         rule.onNodeWithText("GPS du téléphone", substring = true).assertIsDisplayed()
         rule.onNodeWithTag("stats").assertIsDisplayed()
         rule.onNodeWithText("Fermer").performClick()
@@ -254,7 +373,7 @@ class ScreensTest {
     @Test
     fun mes_pistes_liste_et_ouverture() {
         var opened: TrailSession? = null
-        rule.setContent { MaterialTheme { SessionsScreen(savedSessions, SessionsActions(onOpen = { opened = it })) } }
+        rule.setContent { MaterialTheme { SessionsScreen(savedSessions, emptyList(), SessionsActions(onOpen = { opened = it })) } }
 
         rule.onNodeWithText("Trace pas encore récupérée · 15 min").assertIsDisplayed()
         rule.onNodeWithText("0,11 km · 10 min").assertIsDisplayed()
@@ -266,7 +385,7 @@ class ScreensTest {
     @Test
     fun mes_pistes_suppression_avec_confirmation() {
         val deleted = mutableListOf<String>()
-        rule.setContent { MaterialTheme { SessionsScreen(savedSessions, SessionsActions(onDelete = { deleted += it.id })) } }
+        rule.setContent { MaterialTheme { SessionsScreen(savedSessions, emptyList(), SessionsActions(onDelete = { deleted += it.id })) } }
 
         rule.onAllNodesWithText("Supprimer")[1].performClick()
         rule.onNodeWithText("Annuler").performClick()
@@ -279,8 +398,8 @@ class ScreensTest {
 
     @Test
     fun mes_pistes_vide() {
-        rule.setContent { MaterialTheme { SessionsScreen(emptyList(), SessionsActions()) } }
-        rule.onNodeWithText("Aucune piste enregistrée", substring = true).assertIsDisplayed()
+        rule.setContent { MaterialTheme { SessionsScreen(emptyList(), emptyList(), SessionsActions()) } }
+        rule.onNodeWithText("Rien d'enregistré", substring = true).assertIsDisplayed()
     }
 
     // --- Paramètres ---

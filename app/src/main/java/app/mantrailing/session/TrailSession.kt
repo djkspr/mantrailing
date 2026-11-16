@@ -1,6 +1,7 @@
 package app.mantrailing.session
 
 import app.mantrailing.tractive.Position
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -9,10 +10,30 @@ import java.io.File
 @Serializable
 enum class TrackSource { TRACTIVE, PHONE }
 
-/** Piste en cours d'enregistrement (conservée pour survivre à l'arrêt de l'appli). */
-data class ActiveRecording(val id: String, val dogName: String, val source: TrackSource, val startedAt: Long)
+/** Ce qu'on enregistre : la piste posée par le traceur, ou la recherche du chien. */
+enum class RecordingKind { TRAIL, SEARCH }
 
-/** Piste terminée. Horodatages en secondes Unix. */
+/** Enregistrement en cours (conservé pour survivre à l'arrêt de l'appli). */
+data class ActiveRecording(
+    val id: String,
+    val dogName: String,
+    val source: TrackSource,
+    val startedAt: Long,
+    val kind: RecordingKind = RecordingKind.SEARCH,
+    /** Recherche : piste posée que le chien doit suivre. */
+    val trailId: String? = null,
+)
+
+/** Piste posée par le traceur : le parcours que le chien devra suivre. Horodatages en secondes Unix. */
+@Serializable
+data class LaidTrail(
+    val id: String,
+    val startedAt: Long,
+    val endedAt: Long,
+    val points: List<Position> = emptyList(),
+)
+
+/** Recherche terminée : trace du chien, et la piste suivie s'il y en a une. Horodatages en secondes Unix. */
 @Serializable
 data class TrailSession(
     val id: String,
@@ -21,36 +42,64 @@ data class TrailSession(
     val startedAt: Long,
     val endedAt: Long,
     val segments: List<List<Position>> = emptyList(),
-)
+    val trailId: String? = null,
+    /** Copie de la piste posée : la recherche reste complète même si la piste est supprimée. */
+    val trail: List<Position> = emptyList(),
+    /** Fin de la pose de la piste, pour calculer son âge au départ du chien. */
+    val trailEndedAt: Long? = null,
+) {
+    /** Âge de la piste au départ du chien, en secondes. */
+    val trailAgeSeconds: Long? get() = trailEndedAt?.let { (startedAt - it).coerceAtLeast(0) }
+}
 
 private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-/** Pistes enregistrées, une par fichier JSON dans [dir] (stockage privé de l'appli). */
-class SessionRepository(private val dir: File) {
+/** Éléments enregistrés un par fichier JSON dans [dir] (stockage privé de l'appli). */
+open class JsonDirRepository<T>(
+    private val dir: File,
+    private val serializer: KSerializer<T>,
+    private val idOf: (T) -> String,
+    private val dateOf: (T) -> Long,
+) {
     private fun file(id: String) = File(dir, "$id.json")
 
-    fun save(session: TrailSession) {
+    fun save(item: T) {
         dir.mkdirs()
-        // Écriture atomique : un fichier à moitié écrit ne remplace jamais une piste valide.
-        val tmp = File(dir, "${session.id}.json.tmp")
-        tmp.writeText(json.encodeToString(session))
-        if (!tmp.renameTo(file(session.id))) {
-            file(session.id).delete()
-            tmp.renameTo(file(session.id))
+        val id = idOf(item)
+        // Écriture atomique : un fichier à moitié écrit ne remplace jamais un élément valide.
+        val tmp = File(dir, "$id.json.tmp")
+        tmp.writeText(json.encodeToString(serializer, item))
+        if (!tmp.renameTo(file(id))) {
+            file(id).delete()
+            tmp.renameTo(file(id))
         }
     }
 
-    fun load(id: String): TrailSession? = file(id).takeIf { it.exists() }?.let { runCatching { json.decodeFromString<TrailSession>(it.readText()) }.getOrNull() }
+    fun load(id: String): T? = file(id).takeIf { it.exists() }?.let { decode(it) }
 
-    /** Toutes les pistes, la plus récente d'abord ; les fichiers illisibles sont ignorés. */
-    fun list(): List<TrailSession> =
+    /** Tous les éléments, le plus récent d'abord ; les fichiers illisibles sont ignorés. */
+    fun list(): List<T> =
         (dir.listFiles { f -> f.extension == "json" } ?: emptyArray())
-            .mapNotNull { runCatching { json.decodeFromString<TrailSession>(it.readText()) }.getOrNull() }
-            .sortedByDescending { it.startedAt }
+            .mapNotNull(::decode)
+            .sortedByDescending(dateOf)
 
     fun delete(id: String) {
         file(id).delete()
     }
+
+    private fun decode(f: File): T? = runCatching { json.decodeFromString(serializer, f.readText()) }.getOrNull()
+}
+
+/** Recherches enregistrées. */
+class SessionRepository(dir: File) : JsonDirRepository<TrailSession>(dir, TrailSession.serializer(), { it.id }, { it.startedAt })
+
+/** Pistes posées. */
+class LaidTrailRepository(dir: File) : JsonDirRepository<LaidTrail>(dir, LaidTrail.serializer(), { it.id }, { it.startedAt })
+
+/** Pistes proposées au départ d'une recherche : posées depuis moins de [maxAgeSeconds] et pas encore travaillées. */
+fun availableTrails(trails: List<LaidTrail>, sessions: List<TrailSession>, now: Long, maxAgeSeconds: Long = 48 * 3600): List<LaidTrail> {
+    val used = sessions.mapNotNull { it.trailId }.toSet()
+    return trails.filter { it.id !in used && it.points.isNotEmpty() && now - it.endedAt <= maxAgeSeconds }
 }
 
 /**
