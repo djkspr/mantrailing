@@ -137,7 +137,17 @@ const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta n
 <script>
 const segments = ${JSON.stringify(segments.map((s) => s.map((p) => ({ ll: p.latlong, t: p.time, u: p.pos_uncertainty, s: p.sensor_used }))))};
 const map = L.map('map');
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+// Fonds acceptant une page ouverte en file:// (les tuiles OSM officielles la refusent : pas de Referer).
+const ign = (layer, fmt) => 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=' + layer
+  + '&STYLE=normal&TILEMATRIXSET=PM&FORMAT=' + fmt + '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}';
+const bases = {
+  'Plan IGN': L.tileLayer(ign('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png'), { maxZoom: 19, attribution: '© IGN' }),
+  'Photos aériennes IGN': L.tileLayer(ign('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg'), { maxZoom: 19, attribution: '© IGN' }),
+  'Satellite (Esri)': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: '© Esri' }),
+  'Carto (OSM)': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap, © CARTO' }),
+};
+bases['Plan IGN'].addTo(map);
+L.control.layers(bases).addTo(map);
 const all = [];
 for (const seg of segments) {
   L.polyline(seg.map(p => p.ll), { color: '#d9480f', weight: 4 }).addTo(map);
