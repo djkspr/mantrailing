@@ -24,6 +24,8 @@ data class ActiveRecording(
     val trailId: String? = null,
     /** Chien qui cherche (null : aucun chien enregistré dans l'appli). */
     val dogId: String? = null,
+    /** Équipe qui verra la piste ou la recherche (null : espace perso). */
+    val spaceId: String? = null,
 )
 
 /** Piste posée par le traceur : le parcours que le chien devra suivre. Horodatages en secondes Unix. */
@@ -33,7 +35,18 @@ data class LaidTrail(
     val startedAt: Long,
     val endedAt: Long,
     val points: List<Position> = emptyList(),
-)
+    /** Dernière modification, en millisecondes (sauvegarde en ligne) ; absente avant elle. */
+    val updatedAt: Long? = null,
+    /** Parcours retiré du téléphone pour gagner de la place : il n'est plus qu'en ligne. */
+    val archived: Boolean = false,
+    /** Longueur, gardée quand le parcours n'est plus qu'en ligne. */
+    val lengthMeters: Double? = null,
+    /** Équipe qui voit cette piste (null : espace perso, visible de soi seul). */
+    val spaceId: String? = null,
+) {
+    /** Version pour la sauvegarde en ligne : la plus récente l'emporte. */
+    val version: Long get() = updatedAt ?: (endedAt * 1000)
+}
 
 /** Recherche terminée : trace du chien, et la piste suivie s'il y en a une. Horodatages en secondes Unix. */
 @Serializable
@@ -53,9 +66,20 @@ data class TrailSession(
     val notes: List<SearchNote> = emptyList(),
     /** Chien qui a cherché ; absent des recherches d'avant les chiens multiples (reconnues à [dogName]). */
     val dogId: String? = null,
+    /** Dernière modification, en millisecondes (sauvegarde en ligne) ; absente avant elle. */
+    val updatedAt: Long? = null,
+    /** Trace et piste retirées du téléphone pour gagner de la place : elles ne sont plus qu'en ligne. */
+    val archived: Boolean = false,
+    /** Bilan gardé quand la trace n'est plus qu'en ligne. */
+    val summary: SessionSummary? = null,
+    /** Équipe qui voit cette recherche (null : espace perso, visible de soi seul). */
+    val spaceId: String? = null,
 ) {
     /** Âge de la piste au départ du chien, en secondes. */
     val trailAgeSeconds: Long? get() = trailEndedAt?.let { (startedAt - it).coerceAtLeast(0) }
+
+    /** Version pour la sauvegarde en ligne : la plus récente l'emporte. */
+    val version: Long get() = updatedAt ?: (endedAt * 1000)
 }
 
 private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }

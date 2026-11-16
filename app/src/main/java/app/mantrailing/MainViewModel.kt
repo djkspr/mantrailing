@@ -4,7 +4,22 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.mantrailing.data.SessionStore
+import android.content.Context
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import app.mantrailing.data.AppStorage
 import app.mantrailing.demo.DemoSession
+import app.mantrailing.session.stampChangedDogs
+import app.mantrailing.sync.CloudAccount
+import app.mantrailing.sync.CloudConfig
+import app.mantrailing.sync.SyncEvents
+import app.mantrailing.sync.SyncKind
+import app.mantrailing.sync.SyncScheduler
+import app.mantrailing.sync.AppSyncStore
+import app.mantrailing.sync.FirestoreBackend
+import app.mantrailing.sync.SyncItem
+import app.mantrailing.session.DEFAULT_KEEP_ON_PHONE_DAYS
+import app.mantrailing.sync.Team
+import app.mantrailing.sync.TeamDirectory
 import app.mantrailing.session.Dog
 import app.mantrailing.session.mergeTractivePets
 import app.mantrailing.tractive.Session
@@ -99,6 +114,10 @@ data class UiState(
     val quickNotes: List<NoteType> = DEFAULT_QUICK_NOTES,
     /** Notes affichées sur la carte (recherche enregistrée ou démo). */
     val notes: List<SearchNote> = emptyList(),
+    /** Sauvegarde en ligne. */
+    val cloud: CloudState = CloudState(),
+    /** Espace de la dernière piste ou recherche (null : perso), proposé la fois suivante. */
+    val lastSpaceId: String? = null,
 ) {
     val activeDog: Dog? get() = dogs.find { it.id == activeDogId }
 
@@ -110,14 +129,46 @@ data class UiState(
     fun trackerOf(dogId: String?): String? = tractive?.let { dogs.find { it.id == dogId }?.trackerId }
 }
 
+/** Code d'invitation créé pour une équipe, à transmettre. */
+data class Invite(val teamName: String, val code: String)
+
+/** Sauvegarde en ligne et équipes, vues par l'écran des paramètres. */
+data class CloudState(
+    /** Projet Firebase configuré dans cette version de l'appli. */
+    val available: Boolean = false,
+    /** Compte Google connecté (null : sauvegarde désactivée). */
+    val email: String? = null,
+    val wifiOnly: Boolean = true,
+    val syncing: Boolean = false,
+    /** Connexion, déconnexion, création d'équipe… en cours. */
+    val busy: Boolean = false,
+    val lastSyncAt: Long? = null,
+    val lastError: String? = null,
+    /** Équipes dont on est membre. */
+    val teams: List<Team> = emptyList(),
+    /** Jours gardés en entier sur le téléphone (null : tout). */
+    val keepDays: Int? = DEFAULT_KEEP_ON_PHONE_DAYS,
+    /** Code d'invitation à transmettre, une fois créé. */
+    val invite: Invite? = null,
+    /** Résultat de la dernière action (connexion, suppression…), affiché dans les paramètres. */
+    val message: String? = null,
+) {
+    val enabled: Boolean get() = email != null
+
+    /** Nom d'un espace pour l'affichage : « Perso » ou le nom de l'équipe. */
+    fun spaceName(spaceId: String?): String = spaceId?.let { id -> teams.find { it.id == id }?.name ?: "Équipe" } ?: "Perso"
+}
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = SessionStore(app)
     private val api = TractiveApi()
-    private val repository = SessionRepository(File(app.filesDir, "sessions"))
-    private val trailRepository = LaidTrailRepository(File(app.filesDir, "trails"))
+    private val repository = AppStorage.sessions(app)
+    private val trailRepository = AppStorage.trails(app)
     private val notesBuffer = NotesBuffer(File(app.filesDir, "recording/notes.jsonl"))
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
+
+    private fun journalOf(spaceId: String?) = AppStorage.syncJournal(getApplication(), spaceId)
 
     init {
         viewModelScope.launch {
@@ -131,7 +182,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(
                     ready = true, tractive = tractive, dogs = dogs, activeDogId = activeDogId, trackSource = store.trackSource.first(),
                     recording = recording, sessions = sessions, trails = trails,
-                    quickNotes = store.quickNotes.first(),
+                    quickNotes = store.quickNotes.first(), lastSpaceId = store.lastSpaceId.first(),
                     recordingNotes = if (recording?.kind == RecordingKind.SEARCH) withContext(Dispatchers.IO) { notesBuffer.read() } else emptyList(),
                 )
             }
@@ -147,6 +198,254 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             PhoneRecordingService.pointCount.collect { n -> _state.update { it.copy(recordingPoints = n) } }
+        }
+        viewModelScope.launch { initCloud() }
+    }
+
+    // ---------- Sauvegarde en ligne et équipes ----------
+
+    private suspend fun initCloud() {
+        val app = getApplication<Application>()
+        val available = CloudConfig.isAvailable
+        val email = if (available) withContext(Dispatchers.IO) { CloudAccount.email(app) } else null
+        val wifiOnly = store.syncWifiOnly.first()
+        _state.update {
+            it.copy(
+                cloud = it.cloud.copy(
+                    available = available, email = email, wifiOnly = wifiOnly,
+                    teams = if (email != null) store.cloudTeams.first() else emptyList(), keepDays = store.keepOnPhoneDays.first(),
+                ),
+            )
+        }
+        refreshSyncState()
+        if (email != null) SyncScheduler.enable(app, wifiOnly)
+        // Synchronisation terminée (tâche de fond) : on relit ce qui a pu arriver d'un autre téléphone ou d'une équipe.
+        var seen = SyncEvents.status.value.completed
+        SyncEvents.status.collect { status ->
+            _state.update { it.copy(cloud = it.cloud.copy(syncing = status.running)) }
+            if (status.completed != seen) {
+                seen = status.completed
+                reloadFromDisk()
+                refreshSyncState()
+            }
+        }
+    }
+
+    private suspend fun refreshSyncState() {
+        val sync = journalOf(null).read()
+        val teams = if (_state.value.cloud.enabled) store.cloudTeams.first() else emptyList()
+        _state.update { it.copy(cloud = it.cloud.copy(lastSyncAt = sync.lastSyncAt, lastError = sync.lastError, teams = teams)) }
+    }
+
+    private suspend fun reloadFromDisk() {
+        val sessions = withContext(Dispatchers.IO) { repository.list() }
+        val trails = withContext(Dispatchers.IO) { trailRepository.list() }
+        val dogs = store.dogs.first()
+        val activeDogId = store.activeDogId.first()?.takeIf { id -> dogs.any { it.id == id } } ?: dogs.firstOrNull()?.id
+        _state.update { s ->
+            s.copy(
+                sessions = sessions, trails = trails, dogs = dogs, activeDogId = activeDogId,
+                // Élément affiché supprimé ailleurs (ou équipe quittée) : on le referme.
+                openedSession = s.openedSession?.takeIf { o -> sessions.any { it.id == o.id } },
+                openedTrail = s.openedTrail?.takeIf { o -> trails.any { it.id == o.id } },
+            )
+        }
+    }
+
+    /** Un changement fait ici sera envoyé (quand le réseau demandé sera là). */
+    private fun syncChanges() {
+        val cloud = _state.value.cloud
+        if (cloud.enabled) SyncScheduler.syncSoon(getApplication(), cloud.wifiOnly)
+    }
+
+    /** Suppression faite ici dans l'espace [spaceId], à transmettre aux autres téléphones. */
+    private suspend fun recordDeletion(kind: SyncKind, id: String, spaceId: String?) {
+        if (_state.value.cloud.enabled) journalOf(spaceId).recordDeletion(kind, id)
+    }
+
+    /** Connexion Google ; [activityContext] affiche le choix du compte. */
+    fun signInCloud(activityContext: Context) = cloudAction {
+        val email = CloudAccount.signIn(activityContext)
+        _state.update { it.copy(cloud = it.cloud.copy(email = email, message = "Sauvegarde activée.")) }
+        SyncScheduler.enable(getApplication(), _state.value.cloud.wifiOnly)
+        refreshTeams()
+    }
+
+    /** Équipes du compte, relues au serveur ; données des équipes quittées retirées du téléphone. */
+    private suspend fun refreshTeams() {
+        val app = getApplication<Application>()
+        val firestore = CloudConfig.firestore(app) ?: return
+        val uid = CloudAccount.uid(app) ?: return
+        val teams = TeamDirectory(firestore).teamsOf(uid)
+        store.cloudTeams.first().filter { old -> teams.none { it.id == old.id } }.forEach { AppSyncStore.forgetSpace(app, it.id) }
+        store.saveCloudTeams(teams)
+        _state.update { it.copy(cloud = it.cloud.copy(teams = teams)) }
+        reloadFromDisk()
+    }
+
+    private fun directory() = TeamDirectory(CloudConfig.firestore(getApplication()) ?: error("Sauvegarde en ligne indisponible."))
+    private fun uid() = CloudAccount.uid(getApplication()) ?: error("Active d'abord la sauvegarde en ligne.")
+    private fun displayName() = CloudAccount.displayName(getApplication())
+
+    /** Nouvelle équipe (famille, club…), vide : on y met ensuite ce que l'on veut partager. */
+    fun createTeam(name: String) = cloudAction {
+        val clean = name.trim().takeIf { it.isNotEmpty() } ?: return@cloudAction
+        val team = directory().create(uid(), displayName(), clean)
+        refreshTeams()
+        _state.update { it.copy(cloud = it.cloud.copy(message = "Équipe « ${team.name} » créée : invite ses membres.")) }
+    }
+
+    /** Code à transmettre à un membre de la famille, au traceur… */
+    fun createInvite(team: Team) = cloudAction {
+        val code = directory().createInvite(uid(), team.id)
+        _state.update { it.copy(cloud = it.cloud.copy(invite = Invite(team.name, code))) }
+    }
+
+    fun dismissInvite() = _state.update { it.copy(cloud = it.cloud.copy(invite = null)) }
+
+    /** Rejoint une équipe : on reçoit ce qui s'y fait, rien de ce que l'on a déjà n'y est envoyé. */
+    fun joinTeam(code: String) = cloudAction {
+        val team = directory().join(uid(), displayName(), code)
+        refreshTeams()
+        _state.update { it.copy(cloud = it.cloud.copy(message = "Tu as rejoint « ${team.name} ».")) }
+        SyncScheduler.syncNow(getApplication())
+    }
+
+    /** Quitte l'équipe : ses données sont retirées du téléphone (elles restent à l'équipe). */
+    fun leaveTeam(team: Team) = cloudAction {
+        directory().leave(uid(), team)
+        refreshTeams()
+        _state.update { it.copy(cloud = it.cloud.copy(message = "Tu as quitté « ${team.name} ».")) }
+    }
+
+    fun signOutCloud() = cloudAction {
+        val app = getApplication<Application>()
+        SyncScheduler.disable(app)
+        // Les données des équipes leur appartiennent : elles ne restent pas sur le téléphone sans compte.
+        store.cloudTeams.first().forEach { AppSyncStore.forgetSpace(app, it.id) }
+        CloudAccount.signOut(app)
+        AppStorage.resetAllJournals(app)
+        store.saveCloudTeams(emptyList())
+        _state.update { it.copy(cloud = it.cloud.copy(email = null, teams = emptyList(), lastSyncAt = null, lastError = null)) }
+        reloadFromDisk()
+    }
+
+    /** Supprime l'espace perso en ligne et le compte, quitte les équipes ; les données perso du téléphone restent. */
+    fun deleteCloudData(activityContext: Context) = cloudAction {
+        val app = getApplication<Application>()
+        SyncScheduler.disable(app)
+        CloudAccount.deleteEverything(activityContext)
+        store.cloudTeams.first().forEach { AppSyncStore.forgetSpace(app, it.id) }
+        AppStorage.resetAllJournals(app)
+        store.saveCloudTeams(emptyList())
+        _state.update {
+            it.copy(
+                cloud = it.cloud.copy(
+                    email = null, teams = emptyList(), lastSyncAt = null, lastError = null,
+                    message = "Sauvegarde en ligne et compte supprimés. Tes données perso restent sur ce téléphone.",
+                ),
+            )
+        }
+        reloadFromDisk()
+    }
+
+    fun setSyncWifiOnly(wifiOnly: Boolean) {
+        viewModelScope.launch {
+            store.saveSyncWifiOnly(wifiOnly)
+            _state.update { it.copy(cloud = it.cloud.copy(wifiOnly = wifiOnly)) }
+            if (_state.value.cloud.enabled) SyncScheduler.enable(getApplication(), wifiOnly)
+        }
+    }
+
+    /** Jours gardés en entier sur le téléphone ; le reste n'est plus qu'en ligne (appliqué à la synchronisation). */
+    fun setKeepDays(days: Int?) {
+        viewModelScope.launch {
+            store.saveKeepOnPhoneDays(days)
+            _state.update { it.copy(cloud = it.cloud.copy(keepDays = days)) }
+            syncChanges()
+        }
+    }
+
+    fun syncNow() {
+        if (_state.value.cloud.enabled) SyncScheduler.syncNow(getApplication())
+    }
+
+    /** Version complète d'un élément qui n'est plus qu'en ligne. */
+    private suspend fun download(kind: SyncKind, id: String, spaceId: String?): SyncItem {
+        val app = getApplication<Application>()
+        val firestore = CloudConfig.firestore(app) ?: error("Sauvegarde en ligne indisponible.")
+        val uid = CloudAccount.uid(app) ?: error("Reconnecte la sauvegarde en ligne pour l'afficher.")
+        return try {
+            FirestoreBackend.of(firestore, uid, spaceId).get(kind, id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error("Elle n'est plus que dans la sauvegarde en ligne : il faut du réseau pour l'afficher.")
+        } ?: error("Introuvable dans la sauvegarde en ligne.")
+    }
+
+    private suspend fun fullSession(session: TrailSession): TrailSession =
+        if (!session.archived) session
+        else AppSyncStore.decodeSession(download(SyncKind.SESSION, session.id, session.spaceId)).copy(spaceId = session.spaceId)
+
+    private suspend fun fullTrail(trail: LaidTrail): LaidTrail =
+        if (!trail.archived) trail
+        else AppSyncStore.decodeTrail(download(SyncKind.TRAIL, trail.id, trail.spaceId)).copy(spaceId = trail.spaceId)
+
+    /** Partage la recherche avec une équipe, ou la reprend en perso ([spaceId] null). */
+    fun moveSession(session: TrailSession, spaceId: String?) = run {
+        if (session.spaceId == spaceId) return@run
+        val moved = fullSession(session).copy(spaceId = spaceId, archived = false, summary = null, updatedAt = System.currentTimeMillis())
+        withContext(Dispatchers.IO) { repository.save(moved) }
+        recordDeletion(SyncKind.SESSION, session.id, session.spaceId)
+        _state.update { s ->
+            s.copy(
+                sessions = s.sessions.map { if (it.id == moved.id) moved else it },
+                openedSession = s.openedSession?.let { if (it.id == moved.id) moved else it },
+                message = "Recherche déplacée dans « ${s.cloud.spaceName(spaceId)} ».",
+            )
+        }
+        syncChanges()
+    }
+
+    fun moveTrail(trail: LaidTrail, spaceId: String?) = run {
+        if (trail.spaceId == spaceId) return@run
+        val moved = fullTrail(trail).copy(spaceId = spaceId, archived = false, lengthMeters = null, updatedAt = System.currentTimeMillis())
+        withContext(Dispatchers.IO) { trailRepository.save(moved) }
+        recordDeletion(SyncKind.TRAIL, trail.id, trail.spaceId)
+        _state.update { s ->
+            s.copy(
+                trails = s.trails.map { if (it.id == moved.id) moved else it },
+                openedTrail = s.openedTrail?.let { if (it.id == moved.id) moved else it },
+                message = "Piste déplacée dans « ${s.cloud.spaceName(spaceId)} ».",
+            )
+        }
+        syncChanges()
+    }
+
+    /** Partage le chien avec une équipe (toute l'équipe pourra le faire chercher), ou le reprend en perso. */
+    fun moveDog(dog: Dog, spaceId: String?) {
+        if (dog.spaceId == spaceId) return
+        viewModelScope.launch {
+            recordDeletion(SyncKind.DOG, dog.id, dog.spaceId)
+            saveDogs(_state.value.dogs.map { if (it.id == dog.id) it.copy(spaceId = spaceId) else it }, _state.value.activeDogId)
+        }
+    }
+
+    private fun cloudAction(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            _state.update { it.copy(cloud = it.cloud.copy(busy = true, message = null)) }
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: GetCredentialCancellationException) {
+                // Choix du compte abandonné : rien à signaler.
+            } catch (e: Exception) {
+                _state.update { it.copy(cloud = it.cloud.copy(message = "Échec : ${e.message ?: e.javaClass.simpleName}")) }
+            } finally {
+                _state.update { it.copy(cloud = it.cloud.copy(busy = false)) }
+            }
         }
     }
 
@@ -193,7 +492,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val session = _state.value.tractive ?: return
         val pets = api.pets(session)
         val s = _state.value
-        val merged = mergeTractivePets(s.dogs, pets, store.ignoredPetIds.first()) { UUID.randomUUID().toString() }
+        val merged = mergeTractivePets(s.dogs, pets, store.ignoredPetIds.first())
         // Premier import : le chien sélectionné est le premier qui porte un collier.
         val active = s.activeDogId?.takeIf { id -> merged.any { it.id == id } }
             ?: (merged.firstOrNull { it.hasCollar } ?: merged.firstOrNull())?.id
@@ -209,8 +508,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun saveDogs(dogs: List<Dog>, activeDogId: String?) {
-        store.saveDogs(dogs, activeDogId)
-        _state.update { it.copy(dogs = dogs, activeDogId = activeDogId) }
+        val before = _state.value.dogs
+        val stamped = stampChangedDogs(before, dogs, System.currentTimeMillis())
+        store.saveDogs(stamped, activeDogId)
+        _state.update { it.copy(dogs = stamped, activeDogId = activeDogId) }
+        if (stamped != before) syncChanges()
     }
 
     /** Chien qui va chercher ; on revient à la carte vierge. */
@@ -245,6 +547,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (s.recording?.dogId == dog.id) return@launch
             // Animal Tractive retiré (le chat de la maison…) : pas réimporté à la prochaine synchronisation.
             dog.tractivePetId?.let { store.saveIgnoredPetIds(store.ignoredPetIds.first() + it) }
+            recordDeletion(SyncKind.DOG, dog.id, dog.spaceId)
             val remaining = s.dogs.filter { it.id != dog.id }
             saveDogs(remaining, s.activeDogId?.takeIf { it != dog.id } ?: remaining.firstOrNull()?.id)
         }
@@ -293,14 +596,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Le traceur pose la piste : son parcours est enregistré au GPS du téléphone (autorisation déjà accordée). */
-    fun startTrailLaying() = run {
+    fun startTrailLaying(spaceId: String? = null) = run {
         if (_state.value.recording != null) return@run
         val recording = ActiveRecording(
             UUID.randomUUID().toString(), _state.value.dogName, TrackSource.PHONE, Instant.now().epochSecond, RecordingKind.TRAIL,
+            spaceId = spaceId,
         )
         withContext(Dispatchers.IO) { PhoneRecordingService.bufferOf(getApplication()).clear() }
         PhoneRecordingService.start(getApplication(), layingTrail = true)
         store.saveActiveRecording(recording)
+        store.saveLastSpaceId(recording.spaceId)
+        _state.update { it.copy(lastSpaceId = recording.spaceId) }
         _state.update { it.copy(recording = recording).clearedDisplay() }
     }
 
@@ -309,7 +615,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * [remember] : enregistre [source] comme choix pour les recherches suivantes.
      * [trailId] : piste posée que le chien va suivre.
      */
-    fun startRecording(source: TrackSource, remember: Boolean = false, trailId: String? = null) = run {
+    fun startRecording(source: TrackSource, remember: Boolean = false, trailId: String? = null, spaceId: String? = null) = run {
         if (_state.value.recording != null) return@run
         if (remember) {
             store.saveTrackSource(source)
@@ -317,7 +623,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val s = _state.value
         val recording = ActiveRecording(
-            UUID.randomUUID().toString(), s.dogName, source, Instant.now().epochSecond, RecordingKind.SEARCH, trailId, s.activeDog?.id,
+            UUID.randomUUID().toString(), s.dogName, source, Instant.now().epochSecond, RecordingKind.SEARCH, trailId, s.activeDog?.id, spaceId,
         )
         var message: String? = null
         when (source) {
@@ -341,6 +647,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         withContext(Dispatchers.IO) { notesBuffer.clear() }
         store.saveActiveRecording(recording)
+        store.saveLastSpaceId(recording.spaceId)
+        _state.update { it.copy(lastSpaceId = recording.spaceId) }
         _state.update { it.copy(recording = recording, recordingNotes = emptyList(), message = message).clearedDisplay() }
     }
 
@@ -371,9 +679,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun editNotes(change: (List<SearchNote>) -> List<SearchNote>) {
         val session = _state.value.openedSession ?: return
-        val updated = session.copy(notes = change(session.notes))
+        val updated = session.copy(notes = change(session.notes), updatedAt = System.currentTimeMillis())
         viewModelScope.launch {
             withContext(Dispatchers.IO) { repository.save(updated) }
+            syncChanges()
             _state.update {
                 it.copy(
                     openedSession = updated,
@@ -408,8 +717,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(recording = null, message = "Aucune position GPS enregistrée : la piste n'a pas été gardée.") }
             return
         }
-        val trail = LaidTrail(recording.id, recording.startedAt, endedAt, points)
+        val trail = LaidTrail(recording.id, recording.startedAt, endedAt, points, updatedAt = System.currentTimeMillis(), spaceId = recording.spaceId)
         withContext(Dispatchers.IO) { trailRepository.save(trail) }
+        syncChanges()
         _state.update {
             it.copy(
                 recording = null,
@@ -443,12 +753,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val session = TrailSession(
             recording.id, recording.dogName, recording.source, recording.startedAt, endedAt, segments,
             trailId = trail?.id, trail = trail?.points.orEmpty(), trailEndedAt = trail?.endedAt,
-            notes = locateNotes(notes, segments.flatten()), dogId = recording.dogId,
+            notes = locateNotes(notes, segments.flatten()), dogId = recording.dogId, updatedAt = System.currentTimeMillis(), spaceId = recording.spaceId,
         )
         withContext(Dispatchers.IO) {
             repository.save(session)
             notesBuffer.clear()
         }
+        syncChanges()
         store.saveActiveRecording(null)
         _state.update {
             it.copy(
@@ -484,7 +795,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Mes pistes ----------
 
-    fun openSession(session: TrailSession) = run {
+    fun openSession(opened: TrailSession) = run {
+        // Recherche qui n'est plus qu'en ligne : téléchargée pour l'affichage (le téléphone garde le résumé).
+        val session = fullSession(opened)
         showSession(session)
         // Recherche au collier enregistrée avant que Tractive ait transmis les positions : nouvel essai.
         val dogId = session.dogId ?: _state.value.dogs.find { it.name == session.dogName }?.id
@@ -494,8 +807,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(message = "Le collier n'a toujours pas transmis de positions pour cette recherche.") }
             } else {
                 // Notes posées avant que le collier ait transmis ses positions : on les place maintenant.
-                val updated = session.copy(segments = segments, notes = locateNotes(session.notes, segments.flatten()))
+                val updated = session.copy(
+                    segments = segments, notes = locateNotes(session.notes, segments.flatten()), updatedAt = System.currentTimeMillis(),
+                )
                 withContext(Dispatchers.IO) { repository.save(updated) }
+                syncChanges()
                 _state.update { it.copy(sessions = it.sessions.map { old -> if (old.id == updated.id) updated else old }) }
                 showSession(updated)
             }
@@ -509,7 +825,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun openTrail(trail: LaidTrail) = showTrail(trail)
+    fun openTrail(trail: LaidTrail) = run { showTrail(fullTrail(trail)) }
 
     private fun showTrail(trail: LaidTrail) = _state.update {
         it.copy(
@@ -529,6 +845,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteTrail(trail: LaidTrail) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { trailRepository.delete(trail.id) }
+            recordDeletion(SyncKind.TRAIL, trail.id, trail.spaceId)
+            syncChanges()
             _state.update { s ->
                 val updated = s.copy(trails = s.trails.filter { it.id != trail.id })
                 if (s.openedTrail?.id == trail.id) updated.clearedDisplay() else updated
@@ -539,6 +857,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteSession(session: TrailSession) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { repository.delete(session.id) }
+            recordDeletion(SyncKind.SESSION, session.id, session.spaceId)
+            syncChanges()
             _state.update {
                 it.copy(
                     sessions = it.sessions.filter { old -> old.id != session.id },

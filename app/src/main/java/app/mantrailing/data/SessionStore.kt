@@ -2,16 +2,22 @@ package app.mantrailing.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.mantrailing.session.ActiveRecording
+import app.mantrailing.sync.Team
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
+import app.mantrailing.session.DEFAULT_KEEP_ON_PHONE_DAYS
 import app.mantrailing.session.Dog
 import app.mantrailing.session.NoteType
 import app.mantrailing.session.RecordingKind
 import app.mantrailing.session.TrackSource
 import app.mantrailing.session.formatDogs
+import app.mantrailing.session.tractiveDogId
 import app.mantrailing.session.formatQuickNotes
 import app.mantrailing.session.parseDogs
 import app.mantrailing.session.parseQuickNotes
@@ -20,6 +26,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "session")
+private val json = Json { ignoreUnknownKeys = true }
 
 /**
  * Préférences de l'appli, dans son stockage privé : jeton Tractive (jamais le mot de passe), chiens,
@@ -49,7 +56,7 @@ class SessionStore(private val context: Context) {
     private fun legacyDog(p: Preferences): List<Dog> =
         p[PET_ID]?.let { listOf(Dog(legacyDogId(it), p[PET_NAME] ?: it, it, p[TRACKER_ID])) } ?: emptyList()
 
-    private fun legacyDogId(petId: String) = "tractive-$petId"
+    private fun legacyDogId(petId: String) = tractiveDogId(petId)
 
     suspend fun saveDogs(dogs: List<Dog>, activeDogId: String?) {
         context.dataStore.edit {
@@ -61,6 +68,42 @@ class SessionStore(private val context: Context) {
 
     suspend fun saveIgnoredPetIds(ids: Set<String>) {
         context.dataStore.edit { it[IGNORED_PETS] = ids.joinToString(",") }
+    }
+
+    /** Sauvegarde en ligne seulement en Wi-Fi (par défaut : pas de données mobiles). */
+    val syncWifiOnly: Flow<Boolean> = context.dataStore.data.map { p -> p[SYNC_WIFI_ONLY] ?: true }
+
+    suspend fun saveSyncWifiOnly(wifiOnly: Boolean) {
+        context.dataStore.edit { it[SYNC_WIFI_ONLY] = wifiOnly }
+    }
+
+    /** Jours gardés en entier sur le téléphone quand la sauvegarde est active (null : tout garder). */
+    val keepOnPhoneDays: Flow<Int?> = context.dataStore.data.map { p ->
+        when (val v = p[KEEP_DAYS]) {
+            null -> DEFAULT_KEEP_ON_PHONE_DAYS
+            "all" -> null
+            else -> v.toIntOrNull() ?: DEFAULT_KEEP_ON_PHONE_DAYS
+        }
+    }
+
+    suspend fun saveKeepOnPhoneDays(days: Int?) {
+        context.dataStore.edit { it[KEEP_DAYS] = days?.toString() ?: "all" }
+    }
+
+    /** Équipes du compte connecté, telles que lues au serveur à la dernière synchronisation. */
+    val cloudTeams: Flow<List<Team>> = context.dataStore.data.map { p ->
+        p[CLOUD_TEAMS]?.let { runCatching { json.decodeFromString(ListSerializer(Team.serializer()), it) }.getOrNull() } ?: emptyList()
+    }
+
+    suspend fun saveCloudTeams(teams: List<Team>) {
+        context.dataStore.edit { it[CLOUD_TEAMS] = json.encodeToString(ListSerializer(Team.serializer()), teams) }
+    }
+
+    /** Espace choisi pour la dernière piste ou recherche (null : perso), proposé la fois suivante. */
+    val lastSpaceId: Flow<String?> = context.dataStore.data.map { p -> p[LAST_SPACE]?.takeIf { it.isNotEmpty() } }
+
+    suspend fun saveLastSpaceId(spaceId: String?) {
+        context.dataStore.edit { it[LAST_SPACE] = spaceId ?: "" }
     }
 
     /** Source choisie pour la trace du chien, null tant que l'utilisateur n'a pas choisi. */
@@ -79,7 +122,7 @@ class SessionStore(private val context: Context) {
         val id = p[REC_ID] ?: return@map null
         val source = p[REC_SOURCE]?.let { runCatching { TrackSource.valueOf(it) }.getOrNull() } ?: return@map null
         val kind = p[REC_KIND]?.let { runCatching { RecordingKind.valueOf(it) }.getOrNull() } ?: RecordingKind.SEARCH
-        ActiveRecording(id, p[REC_DOG] ?: "", source, p[REC_STARTED] ?: 0, kind, p[REC_TRAIL], p[REC_DOG_ID])
+        ActiveRecording(id, p[REC_DOG] ?: "", source, p[REC_STARTED] ?: 0, kind, p[REC_TRAIL], p[REC_DOG_ID], p[REC_SPACE])
     }
 
     suspend fun saveSession(session: Session) {
@@ -97,7 +140,7 @@ class SessionStore(private val context: Context) {
     suspend fun saveActiveRecording(recording: ActiveRecording?) {
         context.dataStore.edit {
             if (recording == null) {
-                listOf(REC_ID, REC_DOG, REC_SOURCE, REC_KIND, REC_TRAIL, REC_DOG_ID).forEach(it::remove)
+                listOf(REC_ID, REC_DOG, REC_SOURCE, REC_KIND, REC_TRAIL, REC_DOG_ID, REC_SPACE).forEach(it::remove)
                 it.remove(REC_STARTED)
             } else {
                 it[REC_ID] = recording.id
@@ -107,6 +150,7 @@ class SessionStore(private val context: Context) {
                 it[REC_KIND] = recording.kind.name
                 if (recording.trailId != null) it[REC_TRAIL] = recording.trailId else it.remove(REC_TRAIL)
                 if (recording.dogId != null) it[REC_DOG_ID] = recording.dogId else it.remove(REC_DOG_ID)
+                if (recording.spaceId != null) it[REC_SPACE] = recording.spaceId else it.remove(REC_SPACE)
             }
         }
     }
@@ -134,10 +178,15 @@ class SessionStore(private val context: Context) {
         val REC_ID = stringPreferencesKey("recording_id")
         val REC_DOG = stringPreferencesKey("recording_dog")
         val REC_DOG_ID = stringPreferencesKey("recording_dog_id")
+        val REC_SPACE = stringPreferencesKey("recording_space_id")
         val REC_SOURCE = stringPreferencesKey("recording_source")
         val REC_STARTED = longPreferencesKey("recording_started_at")
         val REC_KIND = stringPreferencesKey("recording_kind")
         val REC_TRAIL = stringPreferencesKey("recording_trail_id")
         val QUICK_NOTES = stringPreferencesKey("quick_notes")
+        val SYNC_WIFI_ONLY = booleanPreferencesKey("sync_wifi_only")
+        val CLOUD_TEAMS = stringPreferencesKey("cloud_teams")
+        val LAST_SPACE = stringPreferencesKey("last_space_id")
+        val KEEP_DAYS = stringPreferencesKey("keep_on_phone_days")
     }
 }

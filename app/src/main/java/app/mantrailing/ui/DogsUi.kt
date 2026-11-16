@@ -37,7 +37,11 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import app.mantrailing.session.Dog
+import app.mantrailing.sync.Team
 
 fun dogDetail(dog: Dog) = if (dog.hasCollar) "Porte un collier Tractive" else "Sans collier : trace au GPS du téléphone"
 
@@ -50,10 +54,14 @@ fun DogsSetting(
     onAdd: (String) -> Unit,
     onRename: (Dog, String) -> Unit,
     onDelete: (Dog) -> Unit,
+    teams: List<Team> = emptyList(),
+    onMove: (Dog, String?) -> Unit = { _, _ -> },
 ) {
     var adding by rememberSaveable { mutableStateOf(false) }
     var renamed by remember { mutableStateOf<Dog?>(null) }
     var deleted by remember { mutableStateOf<Dog?>(null) }
+    var moved by remember { mutableStateOf<Dog?>(null) }
+    var menuFor by remember { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Mes chiens", style = MaterialTheme.typography.titleMedium)
         Text(
@@ -73,9 +81,25 @@ fun DogsSetting(
                     Column(Modifier.weight(1f).padding(start = 8.dp)) {
                         Text(dog.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(dogDetail(dog), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (teams.isNotEmpty()) {
+                            Text(
+                                dog.spaceId?.let { id -> "Partagé avec ${teams.find { it.id == id }?.name ?: "une équipe"}" } ?: "Perso",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
-                    TextButton(onClick = { renamed = dog }) { Text("Renommer") }
-                    TextButton(onClick = { deleted = dog }) { Text("Retirer") }
+                    Box {
+                        TextButton(onClick = { menuFor = dog.id }, modifier = Modifier.semantics { contentDescription = "Actions pour ${dog.name}" }) {
+                            Text("⋮")
+                        }
+                        DropdownMenu(expanded = menuFor == dog.id, onDismissRequest = { menuFor = null }) {
+                            DropdownMenuItem(text = { Text("Renommer") }, onClick = { menuFor = null; renamed = dog })
+                            if (teams.isNotEmpty()) {
+                                DropdownMenuItem(text = { Text("Partager avec…") }, onClick = { menuFor = null; moved = dog })
+                            }
+                            DropdownMenuItem(text = { Text("Retirer") }, onClick = { menuFor = null; deleted = dog })
+                        }
+                    }
                 }
             }
         }
@@ -87,6 +111,17 @@ fun DogsSetting(
     }
     renamed?.let { dog ->
         DogNameDialog(title = "Renommer", initial = dog.name, confirm = "Enregistrer", onConfirm = { onRename(dog, it); renamed = null }, onDismiss = { renamed = null })
+    }
+    moved?.let { dog ->
+        SpaceChoiceDialog(
+            title = "${dog.name} : partager avec…",
+            teams = teams,
+            selected = dog.spaceId,
+            help = "Les membres de l'équipe pourront faire chercher ${dog.name} et verront ses recherches faites dans l'équipe. " +
+                "« Perso » : vous seul.",
+            onChoose = { onMove(dog, it); moved = null },
+            onDismiss = { moved = null },
+        )
     }
     deleted?.let { dog ->
         AlertDialog(

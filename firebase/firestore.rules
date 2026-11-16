@@ -1,0 +1,86 @@
+rules_version = '2';
+
+// Sauvegarde en ligne de Mantrailing.
+// - Espace perso : users/{uid}/items, visible de son seul propriétaire.
+// - Équipes (famille, club, binôme…) : teams/{teamId}/items, visibles de leurs seuls membres.
+// Une équipe ne voit que ce qui a été fait ou partagé en son nom : jamais l'espace perso d'un membre,
+// ni ce qu'il fait dans ses autres équipes.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function teamPath(teamId) { return /databases/$(database)/documents/teams/$(teamId); }
+    function isMember(teamId) {
+      return signedIn() && exists(teamPath(teamId)) && request.auth.uid in get(teamPath(teamId)).data.members;
+    }
+
+    // Contenu d'un élément synchronisé (recherche, piste posée, chien).
+    function validItem(item) {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['kind', 'id', 'updatedAt', 'deleted', 'json', 'syncedAt'])
+        && d.kind in ['SESSION', 'TRAIL', 'DOG']
+        && item == d.kind + '_' + d.id
+        && d.updatedAt is int
+        && d.deleted is bool
+        && (d.json == null || (d.json is string && d.json.size() < 1000000))
+        && d.syncedAt == request.time;
+    }
+
+    match /users/{uid} {
+      // Liste de ses équipes (lire une équipe exige d'en être membre : la liste seule ne donne accès à rien).
+      allow read, delete: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['teams'])
+        && request.resource.data.teams is list && request.resource.data.teams.size() <= 50;
+
+      match /items/{item} {
+        allow read, delete: if signedIn() && request.auth.uid == uid;
+        allow create, update: if signedIn() && request.auth.uid == uid && validItem(item);
+      }
+    }
+
+    match /teams/{teamId} {
+      allow read: if isMember(teamId);
+      // Création : on en est le propriétaire et le seul membre.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'owner', 'members'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.members.keys().hasOnly([request.auth.uid]);
+      allow update: if signedIn() && (
+        // Rejoindre : s'ajouter soi-même, avec un code d'invitation encore valable pour cette équipe.
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'joinCode'])
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([request.auth.uid])
+          && request.auth.uid in request.resource.data.members
+          && get(/databases/$(database)/documents/invites/$(request.resource.data.joinCode)).data.teamId == teamId
+          && get(/databases/$(database)/documents/invites/$(request.resource.data.joinCode)).data.expiresAt > request.time
+        )
+        // Quitter : se retirer soi-même.
+        || (
+          isMember(teamId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([request.auth.uid])
+          && !(request.auth.uid in request.resource.data.members)
+        )
+      );
+      // Suppression par son dernier membre.
+      allow delete: if isMember(teamId) && resource.data.members.keys().hasOnly([request.auth.uid]);
+
+      match /items/{item} {
+        allow read, delete: if isMember(teamId);
+        allow create, update: if isMember(teamId) && validItem(item);
+      }
+    }
+
+    // Codes d'invitation : lus seulement par qui connaît le code (pas de liste), créés par un membre, 8 jours au plus.
+    match /invites/{code} {
+      allow get: if signedIn();
+      allow create: if isMember(request.resource.data.teamId)
+        && request.resource.data.keys().hasOnly(['teamId', 'createdBy', 'expiresAt'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.expiresAt < request.time + duration.value(8, 'd');
+      allow delete: if signedIn() && resource.data.createdBy == request.auth.uid;
+    }
+  }
+}

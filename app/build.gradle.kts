@@ -10,6 +10,25 @@ plugins {
 val keystoreProps = rootProject.file("keystore.properties").takeIf { it.exists() }
     ?.let { f -> Properties().apply { f.inputStream().use { load(it) } } }
 
+// Projet Firebase de la sauvegarde en ligne : app/google-services.json (console Firebase). Lu ici plutôt que par le
+// plugin google-services ; sans ce fichier, la sauvegarde en ligne est absente de l'appli.
+@Suppress("UNCHECKED_CAST")
+val firebaseConfig: Map<String, String> = file("google-services.json").takeIf { it.exists() }?.let { f ->
+    val root = groovy.json.JsonSlurper().parse(f) as Map<String, Any?>
+    val project = root["project_info"] as Map<String, Any?>
+    val client = (root["client"] as List<Map<String, Any?>>).first { c ->
+        ((c["client_info"] as Map<String, Any?>)["android_client_info"] as Map<String, Any?>)["package_name"] == "app.mantrailing"
+    }
+    val webClient = (client["oauth_client"] as List<Map<String, Any?>>? ?: emptyList()).firstOrNull { it["client_type"] == 3 }
+        ?: error("google-services.json : pas d'identifiant OAuth « Web » ; active la connexion Google dans Firebase puis retélécharge le fichier.")
+    mapOf(
+        "PROJECT_ID" to project["project_id"] as String,
+        "APP_ID" to (client["client_info"] as Map<String, Any?>)["mobilesdk_app_id"] as String,
+        "API_KEY" to ((client["api_key"] as List<Map<String, Any?>>).first()["current_key"] as String),
+        "WEB_CLIENT_ID" to webClient["client_id"] as String,
+    )
+} ?: emptyMap()
+
 // Chaque envoi au Play Store exige un versionCode plus grand : on prend le nombre de commits.
 val commitCount = providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
     .standardOutput.asText.map { it.trim().toInt() }
@@ -25,6 +44,9 @@ android {
         versionCode = commitCount.getOrElse(1)
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        listOf("PROJECT_ID", "APP_ID", "API_KEY", "WEB_CLIENT_ID").forEach { key ->
+            buildConfigField("String", "FIREBASE_$key", "\"${firebaseConfig[key] ?: ""}\"")
+        }
     }
 
     signingConfigs {
@@ -52,6 +74,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -70,6 +93,15 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    // Sauvegarde en ligne : compte Google, base Firestore, synchronisation en tâche de fond.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.auth)
+    implementation(libs.kotlinx.coroutines.play.services)
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services)
+    implementation(libs.googleid)
 
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver)

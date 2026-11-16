@@ -606,17 +606,22 @@ class ScreensTest {
         rule.onNodeWithTag("dog-name").performTextInput("Gaïa")
         rule.onNodeWithText("Ajouter").performClick()
 
-        rule.onAllNodesWithText("Renommer")[1].performClick()
+        // Sans équipe, pas de partage dans le menu.
+        rule.onNodeWithContentDescription("Actions pour Nala").performClick()
+        rule.onNodeWithText("Partager avec…").assertDoesNotExist()
+        rule.onNodeWithText("Renommer").performClick()
         rule.onNodeWithTag("dog-name").performTextInput(" la belle")
         rule.onNodeWithText("Enregistrer").performClick()
 
         // Retirer demande confirmation ; un chien Tractive ne sera pas réimporté.
-        rule.onAllNodesWithText("Retirer")[0].performClick()
+        rule.onNodeWithContentDescription("Actions pour Rex").performClick()
+        rule.onNodeWithText("Retirer").performClick()
         rule.onNodeWithText("Il ne sera pas réimporté", substring = true).assertIsDisplayed()
         rule.onNodeWithText("Annuler").performClick()
-        rule.onAllNodesWithText("Retirer")[1].performClick()
+        rule.onNodeWithContentDescription("Actions pour Nala").performClick()
+        rule.onNodeWithText("Retirer").performClick()
         rule.onNodeWithText("Retirer Nala ?").assertIsDisplayed()
-        rule.onAllNodesWithText("Retirer").assertCountEquals(3)[2].performClick()
+        rule.onNodeWithText("Retirer").performClick()
 
         assertEquals(listOf("Gaïa"), added)
         assertEquals(listOf(nala to "Nala la belle"), renamed)

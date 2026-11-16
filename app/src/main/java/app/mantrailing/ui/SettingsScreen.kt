@@ -22,7 +22,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -56,9 +60,12 @@ data class SettingsActions(
     val onRenameDog: (Dog, String) -> Unit = { _, _ -> },
     val onDeleteDog: (Dog) -> Unit = {},
     val onSelectDog: (Dog) -> Unit = {},
+    /** Partage un chien avec une équipe, ou le reprend en perso. */
+    val onMoveDog: (Dog, String?) -> Unit = { _, _ -> },
     val onLogout: () -> Unit = {},
     val onTrackSource: (TrackSource) -> Unit = {},
     val onQuickNotes: (List<NoteType>) -> Unit = {},
+    val cloud: CloudActions = CloudActions(),
 )
 
 @Composable
@@ -72,7 +79,10 @@ fun SettingsScreen(state: UiState, actions: SettingsActions) {
             Text("Paramètres", style = MaterialTheme.typography.headlineSmall)
         }
 
-        DogsSetting(state.dogs, state.activeDogId, actions.onSelectDog, actions.onAddDog, actions.onRenameDog, actions.onDeleteDog)
+        DogsSetting(
+            state.dogs, state.activeDogId, actions.onSelectDog, actions.onAddDog, actions.onRenameDog, actions.onDeleteDog,
+            teams = state.cloud.teams, onMove = actions.onMoveDog,
+        )
 
         HorizontalDivider()
         Text("Collier GPS Tractive", style = MaterialTheme.typography.titleMedium)
@@ -96,6 +106,17 @@ fun SettingsScreen(state: UiState, actions: SettingsActions) {
                 }
             }
         }
+
+        HorizontalDivider()
+        // Heure relue chaque minute pour « dernière synchronisation il y a… ».
+        var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(60_000)
+                now = System.currentTimeMillis()
+            }
+        }
+        CloudSetting(state.cloud, now, actions.cloud)
 
         HorizontalDivider()
         TrackSourceSetting(state, actions.onTrackSource)

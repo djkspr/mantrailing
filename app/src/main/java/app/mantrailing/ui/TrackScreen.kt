@@ -269,6 +269,7 @@ private fun RecordingBanner(state: UiState, onStop: () -> Unit) {
                 if (laying) "Pose de la piste · $elapsed" else "Recherche de ${recording.dogName} · $elapsed",
                 style = MaterialTheme.typography.titleMedium,
             )
+            recording.spaceId?.let { Text("Pour l'équipe « ${state.cloud.spaceName(it)} »", style = MaterialTheme.typography.bodySmall) }
             Text(
                 when {
                     laying -> "Parcours du traceur au GPS du téléphone · ${state.recordingPoints} positions"
@@ -338,7 +339,8 @@ fun TrailChoiceDialog(trails: List<LaidTrail>, now: Long, onChoose: (LaidTrail?)
     )
 }
 
-fun trailLength(trail: LaidTrail) = trail.points.zipWithNext { a, b -> distanceMeters(a, b) }.sum()
+/** Longueur de la piste ; gardée à part quand le parcours n'est plus qu'en ligne. */
+fun trailLength(trail: LaidTrail) = trail.lengthMeters ?: trail.points.zipWithNext { a, b -> distanceMeters(a, b) }.sum()
 
 @Composable
 private fun TrailPanel(trail: LaidTrail) {

@@ -37,6 +37,8 @@ import app.mantrailing.session.availableTrails
 import app.mantrailing.session.decideSource
 import app.mantrailing.ui.TrailChoiceDialog
 import java.time.Instant
+import app.mantrailing.ui.CloudActions
+import app.mantrailing.ui.SpaceChoiceDialog
 import app.mantrailing.ui.SessionsActions
 import app.mantrailing.ui.SessionsScreen
 import app.mantrailing.ui.SettingsActions
@@ -70,6 +72,11 @@ private fun App(vm: MainViewModel = viewModel()) {
     var pendingLayTrail by remember { mutableStateOf(false) }
     var rememberPendingChoice by remember { mutableStateOf(false) }
     var pendingTrailId by remember { mutableStateOf<String?>(null) }
+    // Espace (perso ou équipe) de la piste ou recherche à démarrer.
+    var pendingSpaceId by remember { mutableStateOf<String?>(null) }
+    // Choix de l'espace demandé : pour poser une piste (true) ou pour une recherche (false).
+    var askSpaceForTrail by remember { mutableStateOf<Boolean?>(null) }
+    var spaceDefault by remember { mutableStateOf<String?>(null) }
 
     // Compte de démonstration saisi dans les paramètres : retour à la carte.
     LaunchedEffect(state.demo) {
@@ -80,8 +87,8 @@ private fun App(vm: MainViewModel = viewModel()) {
         when {
             result[Manifest.permission.ACCESS_FINE_LOCATION] != true ->
                 vm.showMessage("Sans l'autorisation de localisation précise, le téléphone ne peut rien enregistrer.")
-            pendingLayTrail -> vm.startTrailLaying()
-            else -> vm.startRecording(TrackSource.PHONE, rememberPendingChoice, pendingTrailId)
+            pendingLayTrail -> vm.startTrailLaying(pendingSpaceId)
+            else -> vm.startRecording(TrackSource.PHONE, rememberPendingChoice, pendingTrailId, pendingSpaceId)
         }
     }
 
@@ -95,12 +102,23 @@ private fun App(vm: MainViewModel = viewModel()) {
         permissionLauncher.launch(permissions.toTypedArray())
     }
 
-    fun layTrail() {
+    fun layTrailIn(spaceId: String?) {
+        pendingSpaceId = spaceId
         if (PhoneRecordingService.hasLocationPermission(context)) {
-            vm.startTrailLaying()
+            vm.startTrailLaying(spaceId)
         } else {
             pendingLayTrail = true
             requestLocation()
+        }
+    }
+
+    /** Pose d'une piste ; avec des équipes, on demande d'abord pour qui. */
+    fun layTrail() {
+        if (state.cloud.teams.isEmpty()) {
+            layTrailIn(null)
+        } else {
+            spaceDefault = state.lastSpaceId?.takeIf { id -> state.cloud.teams.any { it.id == id } }
+            askSpaceForTrail = true
         }
     }
 
@@ -110,16 +128,31 @@ private fun App(vm: MainViewModel = viewModel()) {
             rememberPendingChoice = remember
             requestLocation()
         } else {
-            vm.startRecording(source, remember, pendingTrailId)
+            vm.startRecording(source, remember, pendingTrailId, pendingSpaceId)
         }
     }
 
-    /** Recherche sur [trailId] (ou sans piste) : source de la trace, proposée si besoin, puis départ. */
-    fun beginSearch(trailId: String?) {
-        pendingTrailId = trailId
+    /** Recherche dans l'espace [spaceId] : source de la trace, proposée si besoin, puis départ. */
+    fun searchIn(spaceId: String?) {
+        pendingSpaceId = spaceId
         when (val decision = decideSource(state.trackSource, state.connected)) {
             StartDecision.AskSource -> askSource = true
             is StartDecision.Start -> startWith(decision.source, remember = false)
+        }
+    }
+
+    /**
+     * Recherche sur [trailId] (ou sans piste). Avec des équipes, on demande pour qui : par défaut l'équipe
+     * de la piste suivie, sinon celle de la dernière fois.
+     */
+    fun beginSearch(trailId: String?) {
+        pendingTrailId = trailId
+        if (state.cloud.teams.isEmpty()) {
+            searchIn(null)
+        } else {
+            val trailSpace = state.trails.find { it.id == trailId }?.spaceId
+            spaceDefault = (if (trailId != null) trailSpace else state.lastSpaceId)?.takeIf { id -> state.cloud.teams.any { it.id == id } }
+            askSpaceForTrail = false
         }
     }
 
@@ -137,9 +170,24 @@ private fun App(vm: MainViewModel = viewModel()) {
                     onRenameDog = vm::renameDog,
                     onDeleteDog = vm::deleteDog,
                     onSelectDog = vm::selectDog,
+                    onMoveDog = vm::moveDog,
                     onLogout = vm::logout,
                     onTrackSource = vm::setTrackSource,
                     onQuickNotes = vm::setQuickNotes,
+                    cloud = CloudActions(
+                        // Le choix du compte Google s'affiche au-dessus de l'activité.
+                        onSignIn = { vm.signInCloud(context) },
+                        onSignOut = vm::signOutCloud,
+                        onDelete = { vm.deleteCloudData(context) },
+                        onWifiOnly = vm::setSyncWifiOnly,
+                        onSyncNow = vm::syncNow,
+                        onKeepDays = vm::setKeepDays,
+                        onCreateTeam = vm::createTeam,
+                        onInvite = vm::createInvite,
+                        onDismissInvite = vm::dismissInvite,
+                        onJoin = vm::joinTeam,
+                        onLeave = vm::leaveTeam,
+                    ),
                 ),
             )
         }
@@ -155,7 +203,10 @@ private fun App(vm: MainViewModel = viewModel()) {
                     onDelete = vm::deleteSession,
                     onOpenTrail = { vm.openTrail(it); screen = Screen.HOME },
                     onDeleteTrail = vm::deleteTrail,
+                    onMoveSession = vm::moveSession,
+                    onMoveTrail = vm::moveTrail,
                 ),
+                teams = state.cloud.teams,
             )
         }
         else -> TrackScreen(
@@ -194,6 +245,16 @@ private fun App(vm: MainViewModel = viewModel()) {
             now = now,
             onChoose = { trail -> askTrail = false; beginSearch(trail?.id) },
             onDismiss = { askTrail = false },
+        )
+    }
+
+    askSpaceForTrail?.let { forTrail ->
+        SpaceChoiceDialog(
+            title = if (forTrail) "Piste posée pour…" else "Recherche pour…",
+            teams = state.cloud.teams,
+            selected = spaceDefault,
+            onChoose = { spaceId -> askSpaceForTrail = null; if (forTrail) layTrailIn(spaceId) else searchIn(spaceId) },
+            onDismiss = { askSpaceForTrail = null },
         )
     }
 
