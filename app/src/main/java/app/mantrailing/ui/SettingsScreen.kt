@@ -36,7 +36,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.semantics.Role
 import app.mantrailing.UiState
+import app.mantrailing.session.TrackSource
 import app.mantrailing.tractive.Pet
 
 const val PRIVACY_POLICY_URL = "https://djkspr.github.io/mantrailing-site/politique-confidentialite.html"
@@ -48,6 +53,7 @@ data class SettingsActions(
     val onRetryPets: () -> Unit = {},
     val onChangePet: () -> Unit = {},
     val onLogout: () -> Unit = {},
+    val onTrackSource: (TrackSource) -> Unit = {},
 )
 
 @Composable
@@ -79,6 +85,9 @@ fun SettingsScreen(state: UiState, actions: SettingsActions) {
         }
 
         HorizontalDivider()
+        TrackSourceSetting(state, actions.onTrackSource)
+
+        HorizontalDivider()
         val uriHandler = LocalUriHandler.current
         TextButton(onClick = { uriHandler.openUri(PRIVACY_POLICY_URL) }) { Text("Politique de confidentialité") }
         Text(
@@ -86,6 +95,47 @@ fun SettingsScreen(state: UiState, actions: SettingsActions) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun TrackSourceSetting(state: UiState, onSelect: (TrackSource) -> Unit) {
+    // Sans choix enregistré : le collier s'il est connecté, sinon le téléphone (comme au démarrage d'une piste).
+    val selected = when {
+        !state.connected -> TrackSource.PHONE
+        else -> state.trackSource ?: TrackSource.TRACTIVE
+    }
+    Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Trace du chien", style = MaterialTheme.typography.titleMedium)
+        Text("Source utilisée pour enregistrer les pistes.", style = MaterialTheme.typography.bodySmall)
+        SourceOption(
+            label = "Collier Tractive",
+            detail = if (state.connected) "Le mode LIVE est activé automatiquement pendant la piste." else "Connecte d'abord un collier ci-dessus.",
+            selected = selected == TrackSource.TRACTIVE,
+            enabled = state.connected,
+            onClick = { onSelect(TrackSource.TRACTIVE) },
+        )
+        SourceOption(
+            label = "GPS du téléphone",
+            detail = "Le téléphone du maître-chien, à quelques mètres du chien au bout de la longe.",
+            selected = selected == TrackSource.PHONE,
+            enabled = true,
+            onClick = { onSelect(TrackSource.PHONE) },
+        )
+    }
+}
+
+@Composable
+private fun SourceOption(label: String, detail: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null, enabled = enabled)
+        Column(Modifier.padding(start = 8.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

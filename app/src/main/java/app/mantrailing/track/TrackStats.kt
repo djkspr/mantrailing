@@ -32,13 +32,17 @@ data class TrackStats(
                 medianIntervalSeconds = intervals.median(),
                 maxIntervalSeconds = intervals.lastOrNull(),
                 medianUncertaintyMeters = uncertainties.median(),
-                gpsShare = if (points.isEmpty()) 0.0 else points.count { it.sensor == "GPS" }.toDouble() / points.size,
+                gpsShare = if (points.isEmpty()) 0.0 else points.count { it.sensor in GPS_SENSORS }.toDouble() / points.size,
             )
         }
 
         private fun <T> List<T>.median(): T? = if (isEmpty()) null else this[size / 2]
     }
 }
+
+/** Capteurs comptés comme du GPS : celui du collier Tractive et celui du téléphone. */
+val GPS_SENSORS = setOf("GPS", PHONE_GPS_SENSOR)
+const val PHONE_GPS_SENSOR = "PHONE_GPS"
 
 private const val EARTH_RADIUS_M = 6_371_000.0
 

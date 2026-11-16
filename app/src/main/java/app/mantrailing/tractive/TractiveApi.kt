@@ -24,7 +24,8 @@ data class Session(val userId: String, val accessToken: String, val expiresAt: L
 
 data class Pet(val id: String, val name: String, val trackerId: String?)
 
-/** Une position du collier. [time] en secondes Unix, [uncertainty] en mètres. */
+/** Une position (collier ou téléphone). [time] en secondes Unix, [uncertainty] en mètres. */
+@Serializable
 data class Position(
     val time: Long,
     val lat: Double,

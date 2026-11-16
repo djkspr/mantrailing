@@ -27,9 +27,12 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,10 +43,13 @@ import androidx.compose.ui.unit.dp
 import app.mantrailing.TimeRange
 import app.mantrailing.UiState
 import app.mantrailing.demo.DemoSession
+import app.mantrailing.session.TrackSource
 import app.mantrailing.track.TrackStats
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -59,32 +65,43 @@ data class TrackActions(
     val onStartDemo: () -> Unit = {},
     val onExitDemo: () -> Unit = {},
     val onDismissMessage: () -> Unit = {},
+    val onStartRecording: () -> Unit = {},
+    val onStopRecording: () -> Unit = {},
+    val onOpenSessions: () -> Unit = {},
+    val onCloseSession: () -> Unit = {},
 )
 
-/** Écran d'accueil : la carte. Sans collier connecté, propose la connexion ou la séance de démonstration. */
+/** Écran d'accueil : la carte, le démarrage d'une piste, la piste en cours ou une piste enregistrée. */
 @Composable
 fun TrackScreen(state: UiState, actions: TrackActions) {
     var menuOpen by remember { mutableStateOf(false) }
+    var showPeriod by rememberSaveable { mutableStateOf(false) }
     val title = when {
         state.demo -> "${DemoSession.DOG_NAME} (démo)"
+        state.openedSession != null -> state.openedSession.dogName
         else -> state.stored?.pet?.name ?: "Mantrailing"
     }
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                if (state.connected && !state.demo) {
+                if (state.connected && !state.demo && state.recording == null) {
                     OutlinedButton(onClick = { actions.onLive(true) }, enabled = !state.busy) { Text("Activer LIVE") }
                 }
                 Box {
                     TextButton(onClick = { menuOpen = true }, modifier = Modifier.semantics { contentDescription = "Menu" }) { Text("⋮") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("Mes pistes") }, onClick = { menuOpen = false; actions.onOpenSessions() })
                         if (state.connected && !state.demo) {
+                            DropdownMenuItem(
+                                text = { Text(if (showPeriod) "Masquer la recherche par période" else "Trace du collier sur une période") },
+                                onClick = { menuOpen = false; showPeriod = !showPeriod },
+                            )
                             DropdownMenuItem(text = { Text("Arrêter le LIVE") }, onClick = { menuOpen = false; actions.onLive(false) })
                         }
                         if (state.demo) {
                             DropdownMenuItem(text = { Text("Quitter la démo") }, onClick = { menuOpen = false; actions.onExitDemo() })
-                        } else {
+                        } else if (state.recording == null) {
                             DropdownMenuItem(text = { Text("Séance de démonstration") }, onClick = { menuOpen = false; actions.onStartDemo() })
                         }
                         DropdownMenuItem(text = { Text("Paramètres") }, onClick = { menuOpen = false; actions.onOpenSettings() })
@@ -92,26 +109,33 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
                 }
             }
             when {
-                state.demo -> Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium) {
-                    Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Séance de démonstration : données fictives.", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        TextButton(onClick = actions.onExitDemo) { Text("Quitter") }
-                    }
-                }
-                state.connected -> {
-                    RangePicker(state.range, actions.onRangeChange)
+                state.recording != null -> RecordingBanner(state, actions.onStopRecording)
+                state.demo -> InfoBar("Séance de démonstration : données fictives.", "Quitter", actions.onExitDemo)
+                state.openedSession != null -> InfoBar(
+                    "Piste du ${formatSessionDate(state.openedSession.startedAt)} · ${sourceLabel(state.openedSession.source)}",
+                    "Fermer", actions.onCloseSession,
+                )
+                else -> {
                     Button(
-                        onClick = actions.onLoad, enabled = !state.busy && state.range.isValid,
-                        modifier = Modifier.fillMaxWidth().testTag("load"),
-                    ) {
-                        if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Afficher la trace")
+                        onClick = actions.onStartRecording, enabled = !state.busy,
+                        modifier = Modifier.fillMaxWidth().testTag("record"),
+                    ) { Text("Démarrer une piste") }
+                    if (state.connected && showPeriod) {
+                        RangePicker(state.range, actions.onRangeChange)
+                        OutlinedButton(
+                            onClick = actions.onLoad, enabled = !state.busy && state.range.isValid,
+                            modifier = Modifier.fillMaxWidth().testTag("load"),
+                        ) {
+                            if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Afficher la trace du collier")
+                        }
                     }
                 }
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             TrackMap(state.segments, Modifier.fillMaxSize())
-            if (!state.connected && !state.demo) Welcome(state, actions, Modifier.align(Alignment.Center))
+            val idle = !state.demo && state.recording == null && state.openedSession == null && state.segments.isEmpty()
+            if (!state.connected && idle) Welcome(state, actions, Modifier.align(Alignment.Center))
             state.message?.let { msg ->
                 Surface(
                     onClick = actions.onDismissMessage,
@@ -126,13 +150,79 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
 }
 
 @Composable
+private fun InfoBar(text: String, action: String, onAction: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium) {
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = onAction) { Text(action) }
+        }
+    }
+}
+
+@Composable
+private fun RecordingBanner(state: UiState, onStop: () -> Unit) {
+    val recording = state.recording ?: return
+    var now by remember { mutableLongStateOf(Instant.now().epochSecond) }
+    LaunchedEffect(recording.id) {
+        while (true) {
+            now = Instant.now().epochSecond
+            delay(1_000)
+        }
+    }
+    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.testTag("recording")) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Piste en cours · ${formatDuration((now - recording.startedAt).coerceAtLeast(0))}", style = MaterialTheme.typography.titleMedium)
+            Text(
+                when (recording.source) {
+                    TrackSource.PHONE -> "GPS du téléphone · ${state.recordingPoints} positions"
+                    TrackSource.TRACTIVE -> "Collier Tractive (mode LIVE) · trace récupérée à l'arrivée"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Button(onClick = onStop, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+                if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Terminer la piste")
+            }
+        }
+    }
+}
+
+/** Première piste avec un collier connecté : on propose le collier, le choix est gardé. */
+@Composable
+fun SourceChoiceDialog(onChoose: (TrackSource) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Trace du chien") },
+        text = {
+            Text(
+                "Le collier Tractive du chien donne la trace la plus fidèle : le mode LIVE sera activé pendant la piste. " +
+                    "Sinon, la trace est prise par le GPS de ce téléphone, porté par le maître-chien.\n\n" +
+                    "Ce choix sera gardé pour les prochaines pistes ; il se change dans les paramètres.",
+            )
+        },
+        confirmButton = { Button(onClick = { onChoose(TrackSource.TRACTIVE) }) { Text("Collier Tractive") } },
+        dismissButton = { TextButton(onClick = { onChoose(TrackSource.PHONE) }) { Text("GPS du téléphone") } },
+    )
+}
+
+fun sourceLabel(source: TrackSource) = when (source) {
+    TrackSource.TRACTIVE -> "collier Tractive"
+    TrackSource.PHONE -> "GPS du téléphone"
+}
+
+private val SESSION_DATE_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM 'à' HH:mm", Locale.FRENCH)
+
+fun formatSessionDate(epochSeconds: Long, zone: ZoneId = ZoneId.systemDefault()): String =
+    Instant.ofEpochSecond(epochSeconds).atZone(zone).format(SESSION_DATE_FORMAT)
+
+@Composable
 private fun Welcome(state: UiState, actions: TrackActions, modifier: Modifier) {
     Card(modifier.padding(24.dp).testTag("welcome")) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Bienvenue !", style = MaterialTheme.typography.titleLarge)
             Text(
                 if (state.stored == null) {
-                    "Pour afficher la trace de votre chien, connectez son collier GPS Tractive."
+                    "« Démarrer une piste » enregistre la trace avec le GPS du téléphone. " +
+                        "Pour utiliser le collier GPS du chien, connectez votre compte Tractive."
                 } else {
                     "Choisissez votre chien dans les paramètres."
                 },

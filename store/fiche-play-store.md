@@ -10,30 +10,28 @@ La trace GPS de votre chien de mantrailing sur carte IGN, point par point.
 
 ## Description complète (4000 caractères max)
 
-Mantrailing aide les maîtres-chiens à analyser les séances de pistage de personnes (mantrailing) grâce au collier GPS de leur chien.
+Mantrailing aide les maîtres-chiens à analyser les séances de pistage de personnes (mantrailing).
 
-Après une recherche, choisissez le créneau horaire : l'application récupère les positions du collier et trace le parcours du chien sur la carte. Vous voyez où il a travaillé, où il a hésité, où il a fait demi-tour.
+Au départ du chien, « Démarrer une piste » ; à l'arrivée, « Terminer la piste ». L'application enregistre le parcours du chien et l'affiche sur la carte : vous voyez où il a travaillé, où il a hésité, où il a fait demi-tour.
+
+DEUX FAÇONS D'ENREGISTRER LA TRACE
+• Avec le collier GPS Tractive du chien (compte Tractive) : le mode LIVE est activé automatiquement pendant la piste, la trace du collier est récupérée à l'arrivée
+• Avec le GPS du téléphone du maître-chien, à quelques mètres du chien au bout de la longe : une position par seconde, même écran éteint
 
 FONCTIONNALITÉS
-• Compatible avec les colliers GPS Tractive : connexion avec votre compte Tractive
-• Trace du chien sur la carte, avec chaque position GPS
+• Mes pistes : toutes vos pistes enregistrées sur le téléphone, à revoir sur la carte
 • Fonds de carte IGN (plan et photos aériennes) et OpenStreetMap
-• Choix libre de la date et des heures de la séance
-• Bilan de la recherche : distance, durée, fréquence des positions, précision GPS
-• Activation du mode LIVE du collier depuis l'application, pour une position toutes les quelques secondes pendant la recherche
-• Alerte quand les positions sont trop espacées pour une analyse fiable
-• Séance de démonstration pour découvrir l'application sans collier
-
-CONSEIL
-Activez le mode LIVE avant de lancer le chien : hors mode LIVE, le collier n'envoie une position que toutes les quelques minutes, ce qui est trop peu pour suivre une piste.
+• Bilan de chaque piste : distance, durée, fréquence des positions, précision GPS
+• Trace du collier sur une période libre, pour une sortie qui n'a pas été enregistrée
+• Séance de démonstration pour découvrir l'application
 
 VOS DONNÉES
-Votre mot de passe Tractive n'est jamais enregistré : seul un jeton de connexion reste sur votre téléphone. Aucune donnée n'est envoyée au développeur. Pas de publicité, pas de suivi d'audience.
+La position du téléphone n'est lue que pendant une piste que vous avez démarrée, avec une notification affichée. Vos pistes restent sur votre téléphone. Votre mot de passe Tractive n'est jamais enregistré : seul un jeton de connexion est conservé. Aucune donnée n'est envoyée au développeur. Pas de publicité, pas de suivi d'audience.
 
 EN PRÉPARATION
-Enregistrement de la piste du traceur, superposition avec la trace du chien et mesure des écarts, carnet d'entraînement.
+Enregistrement de la piste du traceur, superposition avec la trace du chien et mesure des écarts.
 
-Mantrailing est une application indépendante, ni affiliée à Tractive, ni approuvée par Tractive. Un abonnement Tractive actif est nécessaire pour accéder aux positions du collier.
+Mantrailing est une application indépendante, ni affiliée à Tractive, ni approuvée par Tractive. Un abonnement Tractive actif est nécessaire pour utiliser le collier.
 
 ## Accès à l'application (Play Console > Contenu de l'application)
 
@@ -47,6 +45,15 @@ Choisir « Tout ou partie des fonctionnalités sont limitées », puis ajouter d
   > Pour l'examen, aucun compte Tractive n'est nécessaire : sur l'écran d'accueil, appuyez sur « Voir une séance de
   > démonstration », ou saisissez les identifiants ci-dessus dans Menu (⋮) > Paramètres > Collier GPS Tractive.
   > Une séance fictive complète s'affiche alors (carte, trace, bilan), sans connexion à Tractive.
+
+## Autorisations de service au premier plan (Play Console > Contenu de l'application)
+
+Type « Localisation » (FOREGROUND_SERVICE_LOCATION) :
+- Description : « L'utilisateur démarre l'enregistrement d'une piste de mantrailing (pistage par un chien) ;
+  l'application enregistre la position GPS du téléphone du maître-chien jusqu'à ce qu'il appuie sur « Terminer
+  la piste ». L'enregistrement doit continuer écran éteint pendant toute la recherche, qui dure de quelques
+  minutes à une heure. Une notification reste affichée pendant tout l'enregistrement. »
+- Vidéo : démarrer une piste, montrer la notification, écran éteint, terminer la piste (lien YouTube non répertorié).
 
 ## Visuels
 
