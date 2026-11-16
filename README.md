@@ -3,9 +3,37 @@
 Application Android d'entraînement au mantrailing : enregistre la piste du traceur, récupère la trace du chien
 depuis son collier GPS Tractive et superpose les deux pour analyser le travail du chien.
 
-## Étape 1 — prototype API Tractive
+## Application Android (`app/`)
 
-Tractive n'a pas d'API publique : on utilise l'API de leur appli (non officielle, peut changer).
+Kotlin + Jetpack Compose, carte MapLibre (fonds IGN plan / photos aériennes, OSM via CARTO).
+
+État actuel (v0.1) :
+- connexion au compte Tractive (seul un jeton est conservé, jamais le mot de passe) ;
+- choix du chien ;
+- choix d'une période (date + heures) et affichage de la trace du collier, avec bilan :
+  distance, durée, intervalle entre points, précision, part de positions GPS ;
+- bouton « Activer LIVE » (une position toutes les 2-3 s, indispensable pour le mantrailing).
+
+À venir : enregistrement de la piste du traceur, superposition et écarts chien / piste, carnet d'entraînement.
+
+### Construire et tester
+
+Ouvrir le dossier dans Android Studio, ou en ligne de commande (JDK d'Android Studio) :
+
+```sh
+./gradlew testDebugUnitTest          # tests unitaires (API Tractive simulée, statistiques, période)
+./gradlew connectedDebugAndroidTest  # tests d'interface sur émulateur ou téléphone branché
+./gradlew installDebug               # installer sur le téléphone
+```
+
+## API Tractive
+
+Tractive n'a pas d'API publique : on utilise celle de leur appli (non officielle, référence : la bibliothèque
+Python `aiotractive`), qui peut changer sans prévenir.
+
+**Important :** hors mode LIVE, le collier n'envoie une position que toutes les quelques minutes.
+
+### Script de test (`tools/tractive-probe.mjs`)
 
 ```sh
 cp .env.example .env      # puis renseigner TRACTIVE_EMAIL / TRACTIVE_PASSWORD
@@ -14,6 +42,3 @@ node tools/tractive-probe.mjs --from 2026-11-16T09:00 --to 2026-11-16T12:00
 ```
 
 Résultats dans `data/` (non versionné) : `positions-raw.json`, `trace.gpx`, `trace.html` (carte à ouvrir dans un navigateur).
-
-**Important :** hors mode LIVE, le collier n'envoie une position que toutes les quelques minutes.
-Pour une piste exploitable, activer le LIVE pendant toute la recherche.
