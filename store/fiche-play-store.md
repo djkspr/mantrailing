@@ -65,15 +65,21 @@ Type « Localisation » (FOREGROUND_SERVICE_LOCATION) :
 
 ## Sécurité des données — avec la sauvegarde en ligne (Play Console > Contenu de l'application)
 
-À mettre à jour **le jour où la version avec la sauvegarde en ligne est publiée** (avant : rien ne quitte le
-téléphone, sauf vers Tractive). Politique de confidentialité correspondante : branche `sauvegarde-en-ligne` du
-dépôt mantrailing-site, à fusionner dans `main` au même moment.
+Version avec la sauvegarde en ligne : versionCode 36 (test interne). Politique de confidentialité correspondante en
+ligne depuis le 17/11/2026.
 
-- L'appli collecte ou partage des données : **Oui**. Chiffrées en transit : **Oui** (HTTPS).
-- Les utilisateurs peuvent demander la suppression : **Oui**. Lien de suppression du compte :
-  `https://djkspr.github.io/mantrailing-site/politique-confidentialite.html#suppression-compte`
-- Création de compte : **Oui** (connexion Google) — suppression dans l'appli : Paramètres › Sauvegarde en ligne ›
-  Supprimer mes données en ligne.
+Réponses, dans l'ordre des questions du formulaire :
+
+1. « Votre application collecte-t-elle ou partage-t-elle des données utilisateur ? » → **Oui**
+2. « Toutes les données utilisateur collectées sont-elles chiffrées en transit ? » → **Oui** (HTTPS)
+3. « Quelles méthodes de création de compte votre application prend-elle en charge ? » → **OAuth** seulement
+   (connexion avec le compte Google).
+4. « Lien de suppression du compte » →
+   `https://djkspr.github.io/mantrailing-site/politique-confidentialite.html#suppression-compte`
+   (la page explique la suppression dans l'appli : Paramètres › Sauvegarde en ligne › Supprimer mes données en ligne).
+5. « Les utilisateurs peuvent-ils demander la suppression de certaines de leurs données sans supprimer leur compte ? »
+   → **Oui** (chaque piste ou recherche se supprime depuis « Mes pistes », sur le serveur aussi) ; même lien si demandé.
+6. Types de données : tableau ci-dessous.
 
 | Type de données | Collectée | Partagée | Facultative | Finalité |
 |---|---|---|---|---|
