@@ -1,5 +1,7 @@
 package app.mantrailing.ui
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -136,6 +138,25 @@ class ScreensTest {
         rule.onNodeWithTag("quick-notes").assertIsDisplayed()
         rule.onNodeWithText("Danger").assertIsDisplayed()
         rule.onNodeWithText("Hésitation").assertDoesNotExist()
+    }
+
+    @Test
+    fun pose_en_cours_distance_parcourue() {
+        val recording = ActiveRecording("t1", "Rex", TrackSource.PHONE, Instant.now().epochSecond - 300, RecordingKind.TRAIL)
+        val waiting = mutableStateOf(UiState(ready = true, recording = recording))
+        rule.setContent { MaterialTheme { TrackScreen(waiting.value, TrackActions()) } }
+        rule.onNodeWithText("En attente du GPS du téléphone…").assertIsDisplayed()
+        rule.onNodeWithText("Pose de la piste", substring = true).assertTextContains("0 m", substring = true)
+
+        // 0,001° de latitude ≈ 111 m : 2 pas de 111 m, puis plus d'un kilomètre.
+        val track = (0..2).map { Position(it * 60L, 48.0 + it * 0.001, 2.0) }
+        waiting.value = waiting.value.copy(recordingTrack = track, recordingPoints = track.size)
+        rule.onNodeWithText("Pose de la piste", substring = true).assertTextContains("222 m", substring = true)
+        rule.onNodeWithText("Parcours du traceur au GPS du téléphone · 3 positions").assertIsDisplayed()
+
+        val long = (0..10).map { Position(it * 60L, 48.0 + it * 0.001, 2.0) }
+        waiting.value = waiting.value.copy(recordingTrack = long, recordingPoints = long.size)
+        rule.onNodeWithText("Pose de la piste", substring = true).assertTextContains("1,11 km", substring = true)
     }
 
     @Test

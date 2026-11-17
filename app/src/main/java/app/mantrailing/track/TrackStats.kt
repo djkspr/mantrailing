@@ -46,6 +46,25 @@ const val PHONE_GPS_SENSOR = "PHONE_GPS"
 
 private const val EARTH_RADIUS_M = 6_371_000.0
 
+/**
+ * Longueur d'un parcours à pied, en mètres. Une position n'est comptée qu'à [minStepMeters] de la dernière retenue :
+ * le GPS qui bouge de quelques mètres pendant un arrêt n'allonge pas le parcours.
+ */
+fun pathLengthMeters(points: List<Position>, minStepMeters: Double = 5.0): Double {
+    var anchor = points.firstOrNull() ?: return 0.0
+    var length = 0.0
+    for (p in points) {
+        val step = distanceMeters(anchor, p)
+        if (step >= minStepMeters) {
+            length += step
+            anchor = p
+        }
+    }
+    // Les derniers mètres jusqu'à l'arrivée comptent même s'ils sont courts.
+    if (anchor !== points.last()) length += distanceMeters(anchor, points.last())
+    return length
+}
+
 /** Distance orthodromique (haversine) entre deux positions, en mètres. */
 fun distanceMeters(a: Position, b: Position): Double {
     val lat1 = Math.toRadians(a.lat)

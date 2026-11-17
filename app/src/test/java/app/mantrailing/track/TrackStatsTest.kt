@@ -49,4 +49,23 @@ class TrackStatsTest {
         assertNull(s.medianUncertaintyMeters)
         assertEquals(0.0, s.gpsShare, 0.0)
     }
+
+    @Test
+    fun `longueur d'un parcours - le GPS qui flotte pendant un arret ne compte pas`() {
+        // 0,001° de latitude ≈ 111 m ; 0,00001° ≈ 1 m.
+        val walk = listOf(Position(0, 44.0, 2.0), Position(60, 44.001, 2.0))
+        val stop = (1..30).map { Position(60L + it, 44.001 + (if (it % 2 == 0) 0.00002 else -0.00002), 2.0) }
+        val path = walk + stop + Position(200, 44.002, 2.0)
+
+        assertEquals(222.4, pathLengthMeters(path), 1.0)
+        // Sans filtre, chaque écart de 4 m compterait : plus de 100 m de trop.
+        assertEquals(true, path.zipWithNext { a, b -> distanceMeters(a, b) }.sum() > 330)
+    }
+
+    @Test
+    fun `longueur - parcours vide, point unique, derniers metres comptes`() {
+        assertEquals(0.0, pathLengthMeters(emptyList()), 1e-9)
+        assertEquals(0.0, pathLengthMeters(listOf(Position(0, 44.0, 2.0))), 1e-9)
+        assertEquals(3.3, pathLengthMeters(listOf(Position(0, 44.0, 2.0), Position(5, 44.00003, 2.0))), 0.1)
+    }
 }

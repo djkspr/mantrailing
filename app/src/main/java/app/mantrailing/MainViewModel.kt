@@ -97,6 +97,8 @@ data class UiState(
     val recording: ActiveRecording? = null,
     /** Positions du téléphone enregistrées pour la piste en cours. */
     val recordingPoints: Int = 0,
+    /** Ces positions, pour tracer la piste sur la carte pendant qu'on la pose. */
+    val recordingTrack: List<Position> = emptyList(),
     /** Pistes enregistrées, la plus récente d'abord. */
     val sessions: List<TrailSession> = emptyList(),
     /** Recherche enregistrée affichée sur la carte. */
@@ -199,7 +201,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
-            PhoneRecordingService.pointCount.collect { n -> _state.update { it.copy(recordingPoints = n) } }
+            PhoneRecordingService.track.collect { track -> _state.update { it.copy(recordingPoints = track.size, recordingTrack = track) } }
         }
         viewModelScope.launch { initCloud() }
     }

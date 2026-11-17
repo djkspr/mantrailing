@@ -43,7 +43,7 @@ class PhoneRecordingService : Service(), LocationListener {
     override fun onCreate() {
         super.onCreate()
         buffer = bufferOf(this)
-        _pointCount.value = buffer.read().size
+        _track.value = buffer.read()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -68,8 +68,9 @@ class PhoneRecordingService : Service(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         if (!acceptPhoneFix(if (location.hasAccuracy()) location.accuracy else null)) return
-        buffer.append(location.toPosition())
-        _pointCount.value += 1
+        val position = location.toPosition()
+        buffer.append(position)
+        _track.value = _track.value + position
     }
 
     @Deprecated("Requis sur les anciennes versions d'Android")
@@ -117,9 +118,9 @@ class PhoneRecordingService : Service(), LocationListener {
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running.asStateFlow()
 
-        private val _pointCount = MutableStateFlow(0)
-        /** Positions retenues depuis le début de la piste en cours. */
-        val pointCount: StateFlow<Int> = _pointCount.asStateFlow()
+        private val _track = MutableStateFlow<List<Position>>(emptyList())
+        /** Positions retenues depuis le début de l'enregistrement en cours, pour l'afficher au fur et à mesure. */
+        val track: StateFlow<List<Position>> = _track.asStateFlow()
 
         fun bufferOf(context: Context) = RecordingBuffer(File(context.filesDir, "recording/current.jsonl"))
 
@@ -142,7 +143,7 @@ class PhoneRecordingService : Service(), LocationListener {
             val buffer = bufferOf(context)
             return buffer.read().also {
                 buffer.clear()
-                _pointCount.value = 0
+                _track.value = emptyList()
             }
         }
     }

@@ -2,7 +2,7 @@ package app.mantrailing.session
 
 import app.mantrailing.track.TrackStats
 import app.mantrailing.track.TrailDeviation
-import app.mantrailing.track.distanceMeters
+import app.mantrailing.track.pathLengthMeters
 import kotlinx.serialization.Serializable
 
 /**
@@ -32,7 +32,7 @@ fun archived(session: TrailSession): TrailSession =
     session.copy(segments = emptyList(), trail = emptyList(), archived = true, summary = summaryOf(session))
 
 fun archived(trail: LaidTrail): LaidTrail =
-    trail.copy(points = emptyList(), archived = true, lengthMeters = trail.points.zipWithNext { a, b -> distanceMeters(a, b) }.sum())
+    trail.copy(points = emptyList(), archived = true, lengthMeters = pathLengthMeters(trail.points))
 
 /**
  * Ce qui peut quitter le téléphone : terminé depuis plus de [keepDays] jours, et dont le serveur a confirmé

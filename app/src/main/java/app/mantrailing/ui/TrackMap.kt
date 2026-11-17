@@ -98,6 +98,8 @@ fun TrackMap(
     trail: List<Position> = emptyList(),
     notes: List<SearchNote> = emptyList(),
     onNoteClick: (SearchNote) -> Unit = {},
+    /** Pose en cours : la carte suit la dernière position, tant qu'on ne la déplace pas à la main. */
+    follow: Boolean = false,
 ) {
     val currentNotes by rememberUpdatedState(notes)
     val currentOnNoteClick by rememberUpdatedState(onNoteClick)
@@ -109,6 +111,13 @@ fun TrackMap(
     }
     var map by remember { mutableStateOf<Pair<MapLibreMap, Style>?>(null) }
     var baseIndex by rememberSaveable { mutableIntStateOf(0) }
+    // Suivi interrompu dès que l'utilisateur déplace ou zoome la carte ; « Me localiser » le reprend.
+    var following by remember { mutableStateOf(true) }
+    var followZoomed by remember { mutableStateOf(false) }
+    LaunchedEffect(follow) {
+        following = true
+        followZoomed = false
+    }
 
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -223,6 +232,9 @@ fun TrackMap(
                         PropertyFactory.circleStrokeWidth(3f),
                     ),
                 )
+                m.addOnCameraMoveStartedListener { reason ->
+                    if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) following = false
+                }
                 m.addOnMapClickListener { latLng ->
                     val id = m.queryRenderedFeatures(m.projection.toScreenLocation(latLng), "notes")
                         .firstOrNull()?.getStringProperty("id")
@@ -253,6 +265,15 @@ fun TrackMap(
         style.getSourceAs<GeoJsonSource>(TRAIL_SOURCE)?.setGeoJson(trailLine(trail))
         style.getSourceAs<GeoJsonSource>(TRAIL_ENDS_SOURCE)?.setGeoJson(trailEnds(trail))
         val points = (segments.flatten() + trail).map { LatLng(it.lat, it.lon) }
+        if (follow) {
+            val last = points.lastOrNull() ?: return@LaunchedEffect
+            if (!following) return@LaunchedEffect
+            // Zoom de marche la première fois ; ensuite on garde celui choisi.
+            val zoom = if (followZoomed) m.cameraPosition.zoom else 17.0
+            followZoomed = true
+            m.easeCamera(CameraUpdateFactory.newLatLngZoom(last, zoom), 500)
+            return@LaunchedEffect
+        }
         when {
             points.size == 1 -> m.easeCamera(CameraUpdateFactory.newLatLngZoom(points.first(), 16.0))
             points.size > 1 -> m.easeCamera(
@@ -271,6 +292,7 @@ fun TrackMap(
             val here = currentLocation(context)
             locating = false
             val (m, style) = map ?: return@launch
+            following = true
             if (here == null) {
                 Toast.makeText(context, "Position introuvable : active la localisation du téléphone.", Toast.LENGTH_LONG).show()
                 return@launch

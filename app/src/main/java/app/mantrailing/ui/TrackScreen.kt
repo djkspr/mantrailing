@@ -47,6 +47,7 @@ import app.mantrailing.demo.DemoSession
 import app.mantrailing.session.Dog
 import app.mantrailing.session.LAYING_CATEGORIES
 import app.mantrailing.session.LAYING_QUICK_NOTES
+import app.mantrailing.session.locateNotes
 import app.mantrailing.session.SEARCH_CATEGORIES
 import app.mantrailing.update.UpdateState
 import app.mantrailing.session.LaidTrail
@@ -57,7 +58,7 @@ import app.mantrailing.session.RecordingKind
 import app.mantrailing.session.TrackSource
 import app.mantrailing.track.TrackStats
 import app.mantrailing.track.TrailDeviation
-import app.mantrailing.track.distanceMeters
+import app.mantrailing.track.pathLengthMeters
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
@@ -227,9 +228,14 @@ fun TrackScreen(
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
+            // Pendant la pose, la piste se dessine au fil des pas, avec les signalements déjà placés.
+            val laying = state.recording?.kind == RecordingKind.TRAIL
+            val layingNotes = remember(laying, state.recordingNotes, state.recordingTrack) {
+                if (laying) locateNotes(state.recordingNotes, state.recordingTrack) else emptyList()
+            }
             TrackMap(
-                state.segments, Modifier.fillMaxSize(), trail = state.trailLine,
-                notes = state.notes + state.trailNotes,
+                state.segments, Modifier.fillMaxSize(), trail = if (laying) state.recordingTrack else state.trailLine,
+                notes = state.notes + state.trailNotes + layingNotes, follow = laying,
                 onNoteClick = { note -> if (state.trailNotes.any { it.id == note.id }) trailNoteId = note.id else editedNoteId = note.id },
             )
             val idle = !state.demo && state.recording == null && state.openedSession == null && state.openedTrail == null && state.segments.isEmpty()
@@ -311,12 +317,13 @@ private fun RecordingBanner(state: UiState, onStop: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.testTag("recording")) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                if (laying) "Pose de la piste · $elapsed" else "Recherche de ${recording.dogName} · $elapsed",
+                if (laying) "Pose de la piste · $elapsed · ${formatDistance(pathLengthMeters(state.recordingTrack))}" else "Recherche de ${recording.dogName} · $elapsed",
                 style = MaterialTheme.typography.titleMedium,
             )
             recording.spaceId?.let { Text("Pour l'équipe « ${state.cloud.spaceName(it)} »", style = MaterialTheme.typography.bodySmall) }
             Text(
                 when {
+                    laying && state.recordingPoints == 0 -> "En attente du GPS du téléphone…"
                     laying -> "Parcours du traceur au GPS du téléphone · ${state.recordingPoints} positions"
                     recording.source == TrackSource.PHONE -> "GPS du téléphone · ${state.recordingPoints} positions"
                     else -> "Collier Tractive (mode LIVE) · trace récupérée à l'arrivée"
@@ -391,7 +398,11 @@ fun TrailChoiceDialog(trails: List<LaidTrail>, now: Long, onChoose: (LaidTrail?)
 }
 
 /** Longueur de la piste ; gardée à part quand le parcours n'est plus qu'en ligne. */
-fun trailLength(trail: LaidTrail) = trail.lengthMeters ?: trail.points.zipWithNext { a, b -> distanceMeters(a, b) }.sum()
+/** « 820 m », puis « 1,24 km ». */
+fun formatDistance(meters: Double): String =
+    if (meters < 1_000) "%.0f m".format(Locale.FRENCH, meters) else "%.2f km".format(Locale.FRENCH, meters / 1000)
+
+fun trailLength(trail: LaidTrail) = trail.lengthMeters ?: pathLengthMeters(trail.points)
 
 @Composable
 private fun TrailPanel(trail: LaidTrail) {
