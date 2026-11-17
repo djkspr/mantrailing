@@ -12,7 +12,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-if (-not $env:JAVA_HOME) { $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr' }
+. (Join-Path $PSScriptRoot 'tools\java-home.ps1')
+Set-AndroidJavaHome
 if (-not (Test-Path keystore.properties)) {
     throw "keystore.properties absent : copie $env:USERPROFILE\.android-keys\mantrailing-keystore.properties ici (voir README)."
 }

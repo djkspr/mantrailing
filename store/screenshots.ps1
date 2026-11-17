@@ -3,7 +3,8 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 Set-Location $root
-if (-not $env:JAVA_HOME) { $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr' }
+. (Join-Path $PSScriptRoot '..\tools\java-home.ps1')
+Set-AndroidJavaHome
 $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 
 # Écran 9:16 et barre d'état propre (heure fixe, batterie pleine, pas de notifications).
