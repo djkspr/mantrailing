@@ -43,48 +43,36 @@ $env:MANTRAILING_TEST_SERVER='http://127.0.0.1:3999'; .\gradlew.bat :app:testDeb
 
 ## Mise en place chez o2switch (une fois)
 
-1. **Domaine** — cPanel › Domaines : un domaine ou sous-domaine propre à Mantrailing (par exemple
-   `api.<domaine-mantrailing>`), racine `/home/<compte>/mantrailing-api`. Vérifier que le certificat HTTPS est
-   émis (cPanel › SSL/TLS Status, « Run AutoSSL » au besoin).
-2. **Base de données** — cPanel › Bases de données MySQL :
-   - créer la base `<compte>_mantrailing` ;
-   - créer l'utilisateur `<compte>_mantrailing` avec un mot de passe fort ;
-   - l'ajouter à la base avec **tous les privilèges**.
+1. **Sous-domaine** — cPanel › Domaines : `mantrailing.lesbrasseursdupastel.fr` (certificat HTTPS valide :
+   cPanel › SSL/TLS Status, « Run AutoSSL » au besoin).
+2. **Base de données** — cPanel › Bases de données MySQL : base `gepi9588_mantrailing`, un utilisateur (par exemple
+   `gepi9588_mantrailing`) avec un mot de passe fort, ajouté à la base avec **tous les privilèges** (les tables sont
+   créées par le serveur à son premier démarrage).
 3. **Application Node** — cPanel › Setup Node.js App › Create Application :
    - Node.js version : la plus récente proposée (22 ou plus) ;
    - Application mode : Production ;
    - Application root : `mantrailing-api` ;
-   - Application URL : le sous-domaine ;
+   - Application URL : `mantrailing.lesbrasseursdupastel.fr` ;
    - Application startup file : `src/index.js`.
-   Puis, dans « Environment variables » :
 
-   | Variable | Valeur |
-   |---|---|
-   | `DB_HOST` | `localhost` |
-   | `DB_NAME` | `<compte>_mantrailing` |
-   | `DB_USER` | `<compte>_mantrailing` |
-   | `DB_PASSWORD` | le mot de passe de l'étape 2 |
-   | `GOOGLE_CLIENT_ID` | `1060303843038-k41u1rfk863q4kb8cvdq300eml85s73p.apps.googleusercontent.com` |
+   Aucune variable d'environnement à saisir dans le panneau : la configuration est dans le fichier `.env`
+   (étape 5).
+4. **Compte FTP dédié** — cPanel › Comptes FTP : un compte (par exemple `mantrailing@lesbrasseursdupastel.fr`) dont
+   le répertoire est **limité à `mantrailing-api`** : le déploiement ne voit rien d'autre sur l'hébergement. Sur ce
+   poste, une fois :
 
-   Enregistrer (« Save »).
-4. **Compte FTP dédié** — cPanel › Comptes FTP : créer un compte (par exemple `mantrailing@<domaine>`) dont le
-   répertoire est **limité à `mantrailing-api`** : le déploiement ne voit rien d'autre sur l'hébergement. Sur ce poste,
-   variables d'environnement (utilisateur Windows) :
+   ```powershell
+   .\server\set-deploy-env.ps1     # MANTRAILING_FTP_HOST / _USER / _PASS dans le profil Windows (mot de passe masqué)
+   ```
+5. **Configuration du serveur** — copier `server/.env.example` en `server/.env.production` (non versionné) et y
+   mettre le mot de passe de la base. `deploy.ps1` l'envoie sur le serveur sous le nom `.env` à chaque déploiement.
+6. **WinSCP** — le paquet « WinSCP .NET assembly » (pas l'installateur) doit être extrait dans
+   `tools/winscp-automation` à la racine de ce dépôt (non versionné ; déjà en place sur ce poste).
+7. **Premier envoi** — depuis la racine du dépôt : `.\server\deploy.ps1`, puis dans Setup Node.js App :
+   **Run NPM Install**, puis **Restart**. `https://mantrailing.lesbrasseursdupastel.fr/version` doit répondre.
 
-   | Variable | Valeur |
-   |---|---|
-   | `MANTRAILING_FTP_HOST` | serveur FTP indiqué par cPanel (par exemple `ftp.<domaine>`) |
-   | `MANTRAILING_FTP_USER` | le compte FTP dédié |
-   | `MANTRAILING_FTP_PASS` | son mot de passe |
-
-   Le dossier distant devient alors la racine de ce compte : lancer le déploiement avec `-RemotePath /`.
-5. **WinSCP** — télécharger le paquet « WinSCP .NET assembly » sur winscp.net (pas l'installateur) et l'extraire
-   dans `tools/winscp-automation` à la racine de ce dépôt (non versionné).
-6. **Premier envoi** — depuis la racine du dépôt :
-   `.\server\deploy.ps1 -ApiUrl https://api.<domaine-mantrailing> -RemotePath /`
-   Puis dans Setup Node.js App : **Run NPM Install**, puis **Restart**. `https://<domaine>/version` doit répondre.
-7. **Brancher l'appli** — mettre l'adresse dans `gradle.properties` (`mantrailing.apiUrl=https://…`), puis publier
-   l'appli. Tant que cette adresse est vide, la sauvegarde en ligne n'apparaît pas dans l'appli.
+L'adresse de l'API est déjà dans `gradle.properties` (`mantrailing.apiUrl`) : la prochaine version de l'appli
+affichera la sauvegarde en ligne.
 
 ## Envois suivants
 
@@ -93,3 +81,4 @@ $env:MANTRAILING_TEST_SERVER='http://127.0.0.1:3999'; .\gradlew.bat :app:testDeb
 ```
 
 Si `package.json` a changé, le script le signale : « Run NPM Install » puis « Restart » dans Setup Node.js App.
+Pour changer un mot de passe : modifier `server/.env.production`, puis `.serverdeploy.ps1 -SkipTests`.

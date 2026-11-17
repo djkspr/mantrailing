@@ -6,21 +6,22 @@
 .DESCRIPTION
     1. Tests de l'API contre la base locale (npm run db:local), sauf -SkipTests.
     2. src/version.json : commit déployé, renvoyé par GET /version.
-    3. Envoi par FTP (WinSCP .NET, le même paquet que pour Les Brasseurs du Pastel) : src/, package.json,
-       package-lock.json. Jamais .env, node_modules, test/ ni scripts/.
+    3. Envoi par FTP (WinSCP .NET, tools/winscp-automation) : src/, package.json, package-lock.json, et la
+       configuration server/.env.production (non versionnée) sous le nom .env. Jamais node_modules, test/ ni scripts/.
     4. Redémarrage : tmp/restart.txt (signal de Passenger).
     5. GET <adresse>/version doit renvoyer le commit envoyé.
 
-    FTP : variables MANTRAILING_FTP_HOST, MANTRAILING_FTP_USER et MANTRAILING_FTP_PASS, propres à ce projet
-    (idéalement un compte FTP o2switch limité au dossier de l'API, voir README).
+    FTP : variables MANTRAILING_FTP_HOST, MANTRAILING_FTP_USER et MANTRAILING_FTP_PASS (server/set-deploy-env.ps1),
+    d'un compte FTP o2switch limité au dossier de l'API : sa racine est ce dossier (-RemotePath /).
 
 .EXAMPLE
     .\server\deploy.ps1
     .\server\deploy.ps1 -SkipTests
 #>
 param(
-    # Dossier de l'application Node sur o2switch (« Application root » du panneau Setup Node.js App).
-    [string]$RemotePath = "/mantrailing-api",
+    # Dossier de l'application Node (« Application root » du panneau Setup Node.js App), vu du compte FTP :
+    # « / » pour un compte FTP limité à ce dossier.
+    [string]$RemotePath = "/",
     # Adresse publique de l'API ; par défaut celle de l'appli (gradle.properties, mantrailing.apiUrl).
     [string]$ApiUrl = "",
     [switch]$SkipTests
@@ -38,6 +39,9 @@ if (-not $ApiUrl) { throw "Adresse de l'API inconnue : renseigne mantrailing.api
 $missingFtp = @("MANTRAILING_FTP_HOST", "MANTRAILING_FTP_USER", "MANTRAILING_FTP_PASS") | Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
 if ($missingFtp) { throw "Variables FTP absentes : $($missingFtp -join ", ") (compte FTP o2switch de l'API, voir server/README.md)." }
 $ftpHost = $env:MANTRAILING_FTP_HOST
+$RemotePath = '/' + $RemotePath.Trim('/')
+$remote = { param($name) if ($RemotePath -eq '/') { "/$name" } else { "$RemotePath/$name" } }
+$envFile = Join-Path $serverDir '.env.production'
 
 # Paquet « WinSCP .NET assembly » (build netstandard2.0) extrait dans tools/winscp-automation (non versionné).
 $automationRoot = if ($env:WINSCP_AUTOMATION) { $env:WINSCP_AUTOMATION } else {
@@ -74,7 +78,7 @@ try {
     try {
         $session.Open($options)
         $transfer = New-Object WinSCP.TransferOptions
-        $transfer.FileMask = '|node_modules/;test/;scripts/;.env;.env.*;deploy.ps1;README.md;.gitignore;tmp/'
+        $transfer.FileMask = '|node_modules/;test/;scripts/;.env;.env.*;*.ps1;README.md;.gitignore;tmp/'
         if (-not $session.FileExists($RemotePath)) { $session.CreateDirectory($RemotePath) }
         $result = $session.SynchronizeDirectories(
             [WinSCP.SynchronizationMode]::Remote, $serverDir, $RemotePath, $false, $false,
@@ -83,11 +87,20 @@ try {
         Write-Host ("   {0} fichier(s) envoyé(s)" -f $result.Uploads.Count) -ForegroundColor DarkGray
         $lockChanged = $result.Uploads | Where-Object { $_.FileName -like '*package-lock.json' -or $_.FileName -like '*package.json' }
 
+        # Configuration (mots de passe) : jamais dans le dépôt, envoyée depuis ce poste.
+        if (Test-Path $envFile) {
+            $session.PutFiles($envFile, (& $remote '.env')).Check()
+            Write-Host "   Configuration envoyée (.env.production → .env)" -ForegroundColor DarkGray
+        }
+        elseif (-not $session.FileExists((& $remote '.env'))) {
+            throw "Pas de configuration sur le serveur : copie server/.env.example en server/.env.production, complète-le, puis relance."
+        }
+
         Write-Host "4/5 Redémarrage (Passenger)" -ForegroundColor Cyan
         $restart = Join-Path $env:TEMP 'mantrailing-restart.txt'
         Set-Content $restart (Get-Date -Format o)
-        if (-not $session.FileExists("$RemotePath/tmp")) { $session.CreateDirectory("$RemotePath/tmp") }
-        $session.PutFiles($restart, "$RemotePath/tmp/restart.txt").Check()
+        if (-not $session.FileExists((& $remote 'tmp'))) { $session.CreateDirectory((& $remote 'tmp')) }
+        $session.PutFiles($restart, (& $remote 'tmp/restart.txt')).Check()
     }
     finally {
         $session.Dispose()
