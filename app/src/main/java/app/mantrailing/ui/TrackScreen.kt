@@ -477,7 +477,7 @@ private fun Welcome(actions: TrackActions, modifier: Modifier) {
             Text("Bienvenue !", style = MaterialTheme.typography.titleLarge)
             Text(
                 "Le traceur enregistre son parcours avec « Poser une piste ». « Démarrer une recherche » enregistre " +
-                    "ensuite la trace du chien avec le GPS du téléphone, ou avec son collier si vous connectez votre compte Tractive. " +
+                    "ensuite la trace du chien avec le GPS du téléphone, ou avec son collier si vous connectez votre compte Tractive ou Weenect. " +
                     "Ajoutez vos chiens pour que chacun garde ses recherches.",
                 style = MaterialTheme.typography.bodyMedium,
             )
