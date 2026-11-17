@@ -3,9 +3,15 @@
 #         .\release.ps1 -SkipDeviceTests
 #         .\release.ps1 -Track alpha        (piste Play : internal [défaut], alpha = test fermé, beta, production)
 #         .\release.ps1 -NoUpload           (prépare l'AAB sans l'envoyer)
+#         .\release.ps1 -SkipApi            (API changée : prévenir seulement, sans la déployer)
+#
+# API (server/) : comparée à la version en ligne (/version). Si elle a changé, elle est testée (npm run test:all)
+# puis déployée avec ses migrations (server/deploy.ps1) AVANT l'envoi de l'appli : une nouvelle version de l'appli
+# ne doit jamais arriver sur les téléphones avant le serveur dont elle a besoin.
 param(
     [switch]$SkipDeviceTests,
     [switch]$NoUpload,
+    [switch]$SkipApi,
     [string]$Track = 'internal'
 )
 
@@ -79,8 +85,47 @@ $out = "release\mantrailing-v$version.aab"
 New-Item -ItemType Directory -Force release | Out-Null
 Copy-Item 'app\build\outputs\bundle\release\app-release.aab' $out -Force
 
+# ----- API : déployée avant l'appli si server/ a changé depuis la version en ligne -----
+function Get-ApiState {
+    $apiUrl = ((Get-Content gradle.properties | Where-Object { $_ -match '^\s*mantrailing\.apiUrl\s*=' }) -replace '^[^=]*=\s*', '').Trim()
+    $live = try { (Invoke-RestMethod "$apiUrl/version" -TimeoutSec 20).commit } catch { $null }
+    if (-not $live) { return @{ Url = $apiUrl; Live = $null; Changed = $true; Why = "version en ligne illisible ($apiUrl/version)" } }
+    git cat-file -e "$live^{commit}" 2>$null
+    if ($LASTEXITCODE -ne 0) { return @{ Url = $apiUrl; Live = $live; Changed = $true; Why = "commit en ligne $live inconnu de ce dépôt" } }
+    git diff --quiet $live HEAD -- server
+    if ($LASTEXITCODE -eq 0) { return @{ Url = $apiUrl; Live = $live; Changed = $false; Why = "identique à la version en ligne ($live)" } }
+    $files = (git diff --name-only $live HEAD -- server | Measure-Object).Count
+    return @{ Url = $apiUrl; Live = $live; Changed = $true; Why = "$files fichier(s) de server/ modifié(s) depuis $live" }
+}
+$api = Get-ApiState
+$apiSummary = "API : $($api.Why), rien à déployer."
+if ($api.Changed) {
+    if ($SkipApi -or $NoUpload) {
+        $apiSummary = "⚠ API À DÉPLOYER : $($api.Why). Lancer : cd server; npm run test:all; puis .\server\deploy.ps1"
+        Write-Warning $apiSummary
+    } else {
+        Write-Host "`nAPI : $($api.Why) : tests puis déploiement avant l'envoi de l'appli."
+        # Tests et étiquette « api-tested » dans le dépôt principal (ses dépendances npm y sont installées) :
+        # le commit marqué doit être celui qui part sur Google Play.
+        $mainRepo = (git worktree list --porcelain | Select-Object -First 1) -replace '^worktree ', ''
+        Push-Location (Join-Path $mainRepo 'server')
+        try {
+            npm run test:all
+            if ($LASTEXITCODE -ne 0) { throw "Tests de l'API en échec : ni l'API ni l'appli ne sont envoyées." }
+        } finally { Pop-Location }
+        $tested = git rev-parse api-tested
+        if ($tested -ne (git rev-parse HEAD)) {
+            throw "La version testée de l'API ($($tested.Substring(0,7))) n'est pas celle de cette publication (dépôt principal pas à jour, ou server/ modifié sans commit) : rien n'est envoyé."
+        }
+        pwsh -NoProfile -File (Join-Path $mainRepo 'server\deploy.ps1')
+        if ($LASTEXITCODE -ne 0) { throw "Déploiement de l'API en échec : l'appli n'est pas envoyée (l'AAB reste dans $out)." }
+        $apiSummary = "API déployée (migrations comprises) : $($api.Why)."
+    }
+}
+
 if ($NoUpload) {
     Write-Host "`nPrêt : $out (versionCode $version), non envoyé."
+    Write-Host $apiSummary
     return
 }
 
@@ -94,3 +139,4 @@ if ($LASTEXITCODE -ne 0) { throw "Envoi sur Google Play en échec : l'AAB reste 
 
 git tag -f "play-v$version" | Out-Null
 Write-Host "`nPublié : versionCode $version sur la piste « $Track » (tag play-v$version)."
+Write-Host $apiSummary
