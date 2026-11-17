@@ -130,10 +130,12 @@ class ScreensTest {
     }
 
     @Test
-    fun pas_de_notes_pendant_la_pose_de_piste() {
+    fun pendant_la_pose_seulement_les_notes_du_traceur() {
         val recording = ActiveRecording("t1", "Rex", TrackSource.PHONE, Instant.now().epochSecond, RecordingKind.TRAIL)
         rule.setContent { MaterialTheme { TrackScreen(UiState(ready = true, recording = recording), TrackActions()) } }
-        rule.onNodeWithTag("quick-notes").assertDoesNotExist()
+        rule.onNodeWithTag("quick-notes").assertIsDisplayed()
+        rule.onNodeWithText("Danger").assertIsDisplayed()
+        rule.onNodeWithText("Hésitation").assertDoesNotExist()
     }
 
     @Test
