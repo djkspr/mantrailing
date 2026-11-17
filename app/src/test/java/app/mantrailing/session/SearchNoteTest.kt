@@ -78,7 +78,7 @@ class SearchNoteTest {
     fun `chaque type de note a une famille et un libellé`() {
         NoteType.entries.forEach { assertTrue(it.name, it.label.isNotBlank()) }
         // La liste validée : 23 notes (truffe au sol et truffe haute séparées) + la note libre.
-        assertEquals(24, NoteType.entries.size)
+        assertEquals(27, NoteType.entries.size) // 24 pour la recherche, 3 signalements du traceur
     }
 
     @Test

@@ -1,6 +1,7 @@
 package app.mantrailing.session
 
 import app.mantrailing.tractive.Position
+import app.mantrailing.weather.Weather
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -43,7 +44,14 @@ data class LaidTrail(
     val lengthMeters: Double? = null,
     /** Équipe qui voit cette piste (null : espace perso, visible de soi seul). */
     val spaceId: String? = null,
+    /** Signalements du traceur pendant la pose (danger, point d'attention…), placés sur le parcours. */
+    val notes: List<SearchNote> = emptyList(),
+    /** Météo au début de la pose (null : pas encore récupérée). */
+    val weather: Weather? = null,
 ) {
+    /** Dangers et points d'attention à annoncer au maître-chien avant la recherche. */
+    val warnings: List<SearchNote> get() = notes.filter { it.type.isWarning }
+
     /** Version pour la sauvegarde en ligne : la plus récente l'emporte. */
     val version: Long get() = updatedAt ?: (endedAt * 1000)
 }
@@ -74,6 +82,12 @@ data class TrailSession(
     val summary: SessionSummary? = null,
     /** Équipe qui voit cette recherche (null : espace perso, visible de soi seul). */
     val spaceId: String? = null,
+    /** Copie des signalements du traceur sur la piste suivie. */
+    val trailNotes: List<SearchNote> = emptyList(),
+    /** Météo au départ du chien (null : pas encore récupérée). */
+    val weather: Weather? = null,
+    /** Météo pendant la pose de la piste suivie, pour comparer. */
+    val trailWeather: Weather? = null,
 ) {
     /** Âge de la piste au départ du chien, en secondes. */
     val trailAgeSeconds: Long? get() = trailEndedAt?.let { (startedAt - it).coerceAtLeast(0) }

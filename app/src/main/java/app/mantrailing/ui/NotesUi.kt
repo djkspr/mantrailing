@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import app.mantrailing.session.MAX_QUICK_NOTES
 import app.mantrailing.session.NoteCategory
 import app.mantrailing.session.NoteType
+import app.mantrailing.session.SEARCH_CATEGORIES
 import app.mantrailing.session.SearchNote
 
 /** Pastille de la couleur de la famille de note (la même que sur la carte). */
@@ -95,14 +96,18 @@ fun QuickNotesBar(
 
 /** Toutes les notes, par famille, plus une note libre. */
 @Composable
-fun AllNotesDialog(onPick: (NoteType, String?) -> Unit, onDismiss: () -> Unit) {
+fun AllNotesDialog(
+    onPick: (NoteType, String?) -> Unit,
+    onDismiss: () -> Unit,
+    categories: List<NoteCategory> = SEARCH_CATEGORIES,
+) {
     var free by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Ajouter une note") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                NoteCategory.entries.filter { it != NoteCategory.FREE }.forEach { category ->
+                categories.forEach { category ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         CategoryDot(category)
                         Text(category.label, style = MaterialTheme.typography.titleSmall)
@@ -228,7 +233,7 @@ fun QuickNotesSetting(selected: List<NoteType>, onChange: (List<NoteType>) -> Un
             "Boutons affichés pendant la recherche (${selected.size}/$MAX_QUICK_NOTES). Les autres restent accessibles par « Autre… ».",
             style = MaterialTheme.typography.bodySmall,
         )
-        NoteType.entries.filter { it != NoteType.FREE }.forEach { type ->
+        NoteType.entries.filter { it.category in SEARCH_CATEGORIES }.forEach { type ->
             val checked = type in selected
             val enabled = checked || selected.size < MAX_QUICK_NOTES
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -244,6 +249,70 @@ fun QuickNotesSetting(selected: List<NoteType>, onChange: (List<NoteType>) -> Un
                 CategoryDot(type.category)
                 Text(type.label, Modifier.padding(start = 8.dp), color = if (enabled) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+    }
+}
+
+/**
+ * Juste après un danger ou un point d'attention du traceur : précision facultative (« chien au portail »), pour que
+ * le maître-chien sache de quoi il s'agit. La note est déjà enregistrée, avec son heure et sa position.
+ */
+@Composable
+fun WarningDetailDialog(type: NoteType, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var detail by rememberSaveable { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${type.label} noté") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Précision pour le maître-chien (facultatif) :", style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    value = detail, onValueChange = { detail = it.take(120) },
+                    placeholder = { Text(if (type == NoteType.DANGER) "Route passante, chien au portail…" else "Passage étroit, odeur forte…") },
+                    modifier = Modifier.fillMaxWidth().testTag("warning-detail"),
+                )
+            }
+        },
+        confirmButton = { Button(onClick = { onSave(detail) }, enabled = detail.isNotBlank()) { Text("Enregistrer") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Sans précision") } },
+    )
+}
+
+/** Signalement du traceur sur la carte : en lecture seule (il appartient à la piste posée). */
+@Composable
+fun TrailNoteDialog(note: SearchNote, layingStartedAt: Long?, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CategoryDot(note.type.category)
+                Text(note.type.label)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "Signalé par le traceur" + (layingStartedAt?.let { " ${noteOffset(note, it)} de pose" } ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                note.comment?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fermer") } },
+    )
+}
+
+/** Au départ de la recherche : ce que le traceur a signalé, sans montrer où passe la piste. */
+@Composable
+fun TrailWarnings(warnings: List<SearchNote>, layingStartedAt: Long) {
+    Column(Modifier.fillMaxWidth().testTag("trail-warnings"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            "⚠ Signalé par le traceur :",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.error,
+        )
+        warnings.forEach { note ->
+            Text("• ${note.detail} (${noteOffset(note, layingStartedAt)} de pose)", style = MaterialTheme.typography.bodySmall)
         }
     }
 }

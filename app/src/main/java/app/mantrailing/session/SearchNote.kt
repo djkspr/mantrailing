@@ -14,7 +14,15 @@ enum class NoteCategory(val label: String, val color: String) {
     ENVIRONMENT("L'environnement", "#0C8599"),
     END("La fin", "#F59F00"),
     FREE("Note libre", "#495057"),
+    /** Signalements du traceur pendant la pose : repère noir cerclé de jaune, comme un panneau d'alerte. */
+    TRAILER("Le traceur", "#212529"),
 }
+
+/** Familles proposées au maître-chien pendant la recherche. */
+val SEARCH_CATEGORIES = listOf(NoteCategory.DOG, NoteCategory.HANDLER, NoteCategory.ENVIRONMENT, NoteCategory.END)
+
+/** Familles proposées au traceur pendant la pose : ses signalements, et l'environnement. */
+val LAYING_CATEGORIES = listOf(NoteCategory.TRAILER, NoteCategory.ENVIRONMENT)
 
 /** Ce qui peut arriver pendant une recherche. Le nom de chaque valeur est enregistré : ne pas les renommer. */
 @Serializable
@@ -47,7 +55,19 @@ enum class NoteType(val label: String, val category: NoteCategory) {
     ABANDON("Abandon", NoteCategory.END),
 
     FREE("Note libre", NoteCategory.FREE),
+
+    // Pendant la pose, pour prévenir le maître-chien.
+    DANGER("Danger", NoteCategory.TRAILER),
+    ATTENTION("Point d'attention", NoteCategory.TRAILER),
+    TRAILER_STOP("Arrêt du traceur", NoteCategory.TRAILER),
+    ;
+
+    /** Signalement à montrer au maître-chien avant la recherche. */
+    val isWarning: Boolean get() = this == DANGER || this == ATTENTION
 }
+
+/** Notes rapides pendant la pose de la piste. */
+val LAYING_QUICK_NOTES = listOf(NoteType.DANGER, NoteType.ATTENTION, NoteType.ROAD, NoteType.SURFACE, NoteType.TRAILER_STOP)
 
 /** Notes rapides proposées par défaut pendant la recherche (modifiables dans les paramètres). */
 val DEFAULT_QUICK_NOTES = listOf(
@@ -61,7 +81,8 @@ fun formatQuickNotes(types: List<NoteType>): String = types.joinToString(",") { 
 /** Lecture tolérante : les noms inconnus (version future) sont ignorés, l'ordre est conservé. */
 fun parseQuickNotes(value: String?): List<NoteType> =
     if (value == null) DEFAULT_QUICK_NOTES
-    else value.split(',').mapNotNull { name -> NoteType.entries.find { it.name == name.trim() } }.distinct().take(MAX_QUICK_NOTES)
+    else value.split(',').mapNotNull { name -> NoteType.entries.find { it.name == name.trim() && it.category in SEARCH_CATEGORIES } }
+        .distinct().take(MAX_QUICK_NOTES)
 
 /**
  * Note posée pendant la recherche. [time] en secondes Unix ; la position est retrouvée sur la trace du chien
@@ -77,6 +98,9 @@ data class SearchNote(
     val lon: Double? = null,
 ) {
     val label: String get() = if (type == NoteType.FREE) comment?.takeIf { it.isNotBlank() } ?: type.label else type.label
+
+    /** Libellé avec la précision ajoutée (« Danger — chien au portail »). */
+    val detail: String get() = comment?.takeIf { it.isNotBlank() && type != NoteType.FREE }?.let { "${type.label} — $it" } ?: label
 }
 
 /** Écart maximal entre l'heure d'une note et la position de la trace la plus proche dans le temps. */

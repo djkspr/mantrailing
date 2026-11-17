@@ -1,6 +1,17 @@
 package app.mantrailing.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.testTag
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Text
@@ -77,6 +88,7 @@ private const val DOG_SOURCE = "dog"
 private const val TRAIL_SOURCE = "trail"
 private const val TRAIL_ENDS_SOURCE = "trail-ends"
 private const val NOTES_SOURCE = "notes"
+private const val ME_SOURCE = "me"
 
 @Composable
 /** Carte : trace du chien ([segments], orange) et piste posée par le traceur ([trail], bleu pointillé). */
@@ -194,6 +206,19 @@ fun TrackMap(
                                 *NoteCategory.entries.map { Expression.stop(it.name, it.color) }.toTypedArray(),
                             ),
                         ),
+                        // Signalements du traceur cerclés de jaune, comme un panneau d'alerte.
+                        PropertyFactory.circleStrokeColor(
+                            Expression.match(Expression.get("cat"), Expression.literal("#FFFFFF"), Expression.stop(NoteCategory.TRAILER.name, "#FCC419")),
+                        ),
+                        PropertyFactory.circleStrokeWidth(3f),
+                    ),
+                )
+                // Position du téléphone (« Me localiser ») : point bleu cerclé de blanc, au-dessus de tout.
+                style.addSource(GeoJsonSource(ME_SOURCE))
+                style.addLayer(
+                    CircleLayer("me", ME_SOURCE).withProperties(
+                        PropertyFactory.circleRadius(8f),
+                        PropertyFactory.circleColor("#1971C2"),
                         PropertyFactory.circleStrokeColor("#FFFFFF"),
                         PropertyFactory.circleStrokeWidth(3f),
                     ),
@@ -237,12 +262,48 @@ fun TrackMap(
         }
     }
 
+    // « Me localiser » : la carte se centre sur le téléphone, marqué d'un point bleu.
+    val scope = rememberCoroutineScope()
+    var locating by remember { mutableStateOf(false) }
+    fun locate() {
+        locating = true
+        scope.launch {
+            val here = currentLocation(context)
+            locating = false
+            val (m, style) = map ?: return@launch
+            if (here == null) {
+                Toast.makeText(context, "Position introuvable : active la localisation du téléphone.", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            style.getSourceAs<GeoJsonSource>(ME_SOURCE)?.setGeoJson(Point.fromLngLat(here.longitude, here.latitude))
+            m.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(here.latitude, here.longitude), maxOf(m.cameraPosition.zoom, 16.0)))
+        }
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted.values.any { it }) locate()
+        else Toast.makeText(context, "Sans autorisation de localisation, la carte ne peut pas te situer.", Toast.LENGTH_LONG).show()
+    }
+
     Box(modifier) {
         AndroidView(factory = { mapView })
         FilledTonalButton(
             onClick = { baseIndex = (baseIndex + 1) % BASE_LAYERS.size },
             modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
         ) { Text(BASE_LAYERS[baseIndex].second) }
+        FilledTonalButton(
+            onClick = {
+                val allowed = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                    .any { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+                if (allowed) locate()
+                else permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            },
+            enabled = !locating,
+            // Au-dessus de l'attribution des fonds de carte, en bas à droite.
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 36.dp).testTag("locate-me"),
+        ) {
+            if (locating) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            else Text("◎ Me localiser")
+        }
     }
 }
 

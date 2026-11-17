@@ -274,6 +274,7 @@ private fun App(
                 onUndoNote = vm::undoLastNote,
                 onUpdateNote = vm::updateNote,
                 onDeleteNote = vm::deleteNote,
+                onCommentLastNote = vm::commentLastNote,
             ),
             update = shownUpdate,
             updateActions = updateActions.copy(onLater = { updateLater = true }),

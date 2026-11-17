@@ -14,6 +14,7 @@ import app.mantrailing.sync.CloudConfig
 import app.mantrailing.sync.SyncEvents
 import app.mantrailing.sync.SyncKind
 import app.mantrailing.sync.SyncScheduler
+import app.mantrailing.weather.WeatherApi
 import app.mantrailing.sync.AppSyncStore
 import app.mantrailing.sync.SyncItem
 import app.mantrailing.session.DEFAULT_KEEP_ON_PHONE_DAYS
@@ -112,6 +113,8 @@ data class UiState(
     val quickNotes: List<NoteType> = DEFAULT_QUICK_NOTES,
     /** Notes affichées sur la carte (recherche enregistrée ou démo). */
     val notes: List<SearchNote> = emptyList(),
+    /** Signalements du traceur affichés sur la carte (piste posée, ou piste suivie par la recherche), en lecture seule. */
+    val trailNotes: List<SearchNote> = emptyList(),
     /** Sauvegarde en ligne. */
     val cloud: CloudState = CloudState(),
     /** Espace de la dernière piste ou recherche (null : perso), proposé la fois suivante. */
@@ -160,6 +163,7 @@ data class CloudState(
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = SessionStore(app)
     private val api = TractiveApi()
+    private val weatherApi = WeatherApi()
     private val repository = AppStorage.sessions(app)
     private val trailRepository = AppStorage.trails(app)
     private val notesBuffer = NotesBuffer(File(app.filesDir, "recording/notes.jsonl"))
@@ -181,7 +185,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     ready = true, tractive = tractive, dogs = dogs, activeDogId = activeDogId, trackSource = store.trackSource.first(),
                     recording = recording, sessions = sessions, trails = trails,
                     quickNotes = store.quickNotes.first(), lastSpaceId = store.lastSpaceId.first(),
-                    recordingNotes = if (recording?.kind == RecordingKind.SEARCH) withContext(Dispatchers.IO) { notesBuffer.read() } else emptyList(),
+                    recordingNotes = if (recording != null) withContext(Dispatchers.IO) { notesBuffer.read() } else emptyList(),
                 )
             }
             // Enregistre la liste (migration du chien unique d'avant) ; compte connecté sans chien lié : import.
@@ -475,6 +479,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             stats = TrackStats.of(DemoSession.segments),
             trailLine = DemoSession.trail,
             notes = DemoSession.notes,
+            trailNotes = emptyList(),
             loadedOnce = true,
             message = null,
         )
@@ -483,7 +488,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun exitDemo() = _state.update {
         it.copy(
             demo = false, range = TimeRange.lastHours(3), segments = emptyList(), stats = null,
-            trailLine = emptyList(), notes = emptyList(), loadedOnce = false, message = null,
+            trailLine = emptyList(), notes = emptyList(), trailNotes = emptyList(), loadedOnce = false, message = null,
         )
     }
 
@@ -606,11 +611,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             UUID.randomUUID().toString(), _state.value.dogName, TrackSource.PHONE, Instant.now().epochSecond, RecordingKind.TRAIL,
             spaceId = spaceId,
         )
-        withContext(Dispatchers.IO) { PhoneRecordingService.bufferOf(getApplication()).clear() }
+        withContext(Dispatchers.IO) {
+            PhoneRecordingService.bufferOf(getApplication()).clear()
+            notesBuffer.clear()
+        }
         PhoneRecordingService.start(getApplication(), layingTrail = true)
         store.saveActiveRecording(recording)
         store.saveLastSpaceId(recording.spaceId)
-        _state.update { it.copy(lastSpaceId = recording.spaceId) }
+        _state.update { it.copy(lastSpaceId = recording.spaceId, recordingNotes = emptyList()) }
         _state.update { it.copy(recording = recording).clearedDisplay() }
     }
 
@@ -656,15 +664,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(recording = recording, recordingNotes = emptyList(), message = message).clearedDisplay() }
     }
 
-    // ---------- Notes pendant la recherche ----------
+    // ---------- Notes pendant la recherche, ou signalements du traceur pendant la pose ----------
 
-    /** Note posée maintenant ; sa position sera retrouvée sur la trace à la fin de la recherche. */
+    /** Note posée maintenant ; sa position sera retrouvée sur la trace (ou le parcours du traceur) à la fin. */
     fun addNote(type: NoteType, comment: String? = null) {
-        val recording = _state.value.recording?.takeIf { it.kind == RecordingKind.SEARCH } ?: return
+        val recording = _state.value.recording ?: return
         val note = SearchNote(UUID.randomUUID().toString(), Instant.now().epochSecond, type, comment?.trim()?.takeIf { it.isNotEmpty() })
         viewModelScope.launch {
             withContext(Dispatchers.IO) { notesBuffer.append(note) }
             if (_state.value.recording?.id == recording.id) _state.update { it.copy(recordingNotes = it.recordingNotes + note) }
+        }
+    }
+
+    /** Précision ajoutée à la dernière note (« chien au portail », « route passante »…), après coup. */
+    fun commentLastNote(comment: String) {
+        val clean = comment.trim().takeIf { it.isNotEmpty() } ?: return
+        val last = _state.value.recordingNotes.lastOrNull() ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val notes = notesBuffer.read().map { if (it.id == last.id) it.copy(comment = clean) else it }
+                notesBuffer.clear()
+                notes.forEach(notesBuffer::append)
+            }
+            _state.update { s -> s.copy(recordingNotes = s.recordingNotes.map { if (it.id == last.id) it.copy(comment = clean) else it }) }
         }
     }
 
@@ -721,8 +743,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(recording = null, message = "Aucune position GPS enregistrée : la piste n'a pas été gardée.") }
             return
         }
-        val trail = LaidTrail(recording.id, recording.startedAt, endedAt, points, updatedAt = System.currentTimeMillis(), spaceId = recording.spaceId)
-        withContext(Dispatchers.IO) { trailRepository.save(trail) }
+        // Signalements du traceur, placés sur son parcours.
+        val notes = locateNotes(withContext(Dispatchers.IO) { notesBuffer.read() }, points)
+        val trail = LaidTrail(
+            recording.id, recording.startedAt, endedAt, points, updatedAt = System.currentTimeMillis(), spaceId = recording.spaceId,
+            notes = notes,
+        )
+        withContext(Dispatchers.IO) {
+            trailRepository.save(trail)
+            notesBuffer.clear()
+        }
         syncChanges()
         _state.update {
             it.copy(
@@ -732,6 +762,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         showTrail(trail)
+        fetchTrailWeather(trail)
     }
 
     private suspend fun finishSearch(recording: ActiveRecording, outcome: NoteType?) {
@@ -758,6 +789,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             recording.id, recording.dogName, recording.source, recording.startedAt, endedAt, segments,
             trailId = trail?.id, trail = trail?.points.orEmpty(), trailEndedAt = trail?.endedAt,
             notes = locateNotes(notes, segments.flatten()), dogId = recording.dogId, updatedAt = System.currentTimeMillis(), spaceId = recording.spaceId,
+            trailNotes = trail?.notes.orEmpty(), trailWeather = trail?.weather,
         )
         withContext(Dispatchers.IO) {
             repository.save(session)
@@ -774,6 +806,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         showSession(session)
+        fetchSessionWeather(session)
     }
 
     /** Positions du collier de [dogId] pendant la recherche (avec une marge d'une minute). Vide en cas d'échec réseau. */
@@ -803,6 +836,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Recherche qui n'est plus qu'en ligne : téléchargée pour l'affichage (le téléphone garde le résumé).
         val session = fullSession(opened)
         showSession(session)
+        fetchSessionWeather(session)
         // Recherche au collier enregistrée avant que Tractive ait transmis les positions : nouvel essai.
         val dogId = session.dogId ?: _state.value.dogs.find { it.name == session.dogName }?.id
         if (session.source == TrackSource.TRACTIVE && session.segments.isEmpty() && _state.value.trackerOf(dogId) != null) {
@@ -825,16 +859,66 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun showSession(session: TrailSession) = _state.update {
         it.copy(
             openedSession = session, openedTrail = null, demo = false, segments = session.segments,
-            stats = TrackStats.of(session.segments), trailLine = session.trail, notes = session.notes, loadedOnce = true,
+            stats = TrackStats.of(session.segments), trailLine = session.trail, notes = session.notes, trailNotes = session.trailNotes,
+            loadedOnce = true,
         )
     }
 
-    fun openTrail(trail: LaidTrail) = run { showTrail(fullTrail(trail)) }
+    fun openTrail(trail: LaidTrail) = run {
+        val full = fullTrail(trail)
+        showTrail(full)
+        fetchTrailWeather(full)
+    }
+
+    // ---------- Météo (Open-Meteo), récupérée après coup : sans réseau, nouvel essai à la prochaine ouverture ----------
+
+    /** La météo n'est disponible que sur les 3 derniers mois. */
+    private fun weatherStillAvailable(epochSeconds: Long) = Instant.now().epochSecond - epochSeconds < 90 * 86_400L
+
+    /** Météo au début de la pose, au premier point du parcours du traceur. */
+    private fun fetchTrailWeather(trail: LaidTrail) {
+        val start = trail.points.firstOrNull() ?: return
+        if (trail.weather != null || trail.archived || !weatherStillAvailable(trail.startedAt)) return
+        viewModelScope.launch {
+            val weather = weatherApi.at(start.lat, start.lon, trail.startedAt) ?: return@launch
+            val current = withContext(Dispatchers.IO) { trailRepository.load(trail.id) } ?: return@launch
+            if (current.weather != null || current.archived) return@launch
+            val updated = current.copy(weather = weather, updatedAt = System.currentTimeMillis())
+            withContext(Dispatchers.IO) { trailRepository.save(updated) }
+            _state.update { s ->
+                s.copy(
+                    trails = s.trails.map { if (it.id == updated.id) updated else it },
+                    openedTrail = s.openedTrail?.let { if (it.id == updated.id) updated else it },
+                )
+            }
+            syncChanges()
+        }
+    }
+
+    /** Météo au départ du chien, au premier point de sa trace (ou au départ de la piste suivie). */
+    private fun fetchSessionWeather(session: TrailSession) {
+        val start = session.segments.firstOrNull()?.firstOrNull() ?: session.trail.firstOrNull() ?: return
+        if (session.weather != null || session.archived || !weatherStillAvailable(session.startedAt)) return
+        viewModelScope.launch {
+            val weather = weatherApi.at(start.lat, start.lon, session.startedAt) ?: return@launch
+            val current = withContext(Dispatchers.IO) { repository.load(session.id) } ?: return@launch
+            if (current.weather != null || current.archived) return@launch
+            val updated = current.copy(weather = weather, updatedAt = System.currentTimeMillis())
+            withContext(Dispatchers.IO) { repository.save(updated) }
+            _state.update { s ->
+                s.copy(
+                    sessions = s.sessions.map { if (it.id == updated.id) updated else it },
+                    openedSession = s.openedSession?.let { if (it.id == updated.id) updated else it },
+                )
+            }
+            syncChanges()
+        }
+    }
 
     private fun showTrail(trail: LaidTrail) = _state.update {
         it.copy(
             openedTrail = trail, openedSession = null, demo = false, segments = emptyList(),
-            stats = null, trailLine = trail.points, notes = emptyList(), loadedOnce = true,
+            stats = null, trailLine = trail.points, notes = emptyList(), trailNotes = trail.notes, loadedOnce = true,
         )
     }
 
@@ -843,7 +927,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Plus rien d'affiché sur la carte. */
     private fun UiState.clearedDisplay() = copy(
         demo = false, openedSession = null, openedTrail = null, segments = emptyList(), stats = null,
-        trailLine = emptyList(), notes = emptyList(), loadedOnce = false,
+        trailLine = emptyList(), notes = emptyList(), trailNotes = emptyList(), loadedOnce = false,
     )
 
     fun deleteTrail(trail: LaidTrail) {

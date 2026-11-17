@@ -45,6 +45,9 @@ import app.mantrailing.TimeRange
 import app.mantrailing.UiState
 import app.mantrailing.demo.DemoSession
 import app.mantrailing.session.Dog
+import app.mantrailing.session.LAYING_CATEGORIES
+import app.mantrailing.session.LAYING_QUICK_NOTES
+import app.mantrailing.session.SEARCH_CATEGORIES
 import app.mantrailing.update.UpdateState
 import app.mantrailing.session.LaidTrail
 import app.mantrailing.session.NoteCategory
@@ -91,6 +94,8 @@ data class TrackActions(
     val onUndoNote: () -> Unit = {},
     val onUpdateNote: (SearchNote) -> Unit = {},
     val onDeleteNote: (SearchNote) -> Unit = {},
+    /** Précision ajoutée à la dernière note posée (danger, point d'attention du traceur). */
+    val onCommentLastNote: (String) -> Unit = {},
 )
 
 /** Écran d'accueil : la carte, la pose d'une piste, la recherche en cours, ou une piste / recherche enregistrée. */
@@ -107,6 +112,9 @@ fun TrackScreen(
     var showNotesList by rememberSaveable { mutableStateOf(false) }
     var editedNoteId by rememberSaveable { mutableStateOf<String?>(null) }
     var askOutcome by rememberSaveable { mutableStateOf(false) }
+    // Signalement du traceur à préciser, et signalement affiché (lecture seule).
+    var detailFor by rememberSaveable { mutableStateOf<NoteType?>(null) }
+    var trailNoteId by rememberSaveable { mutableStateOf<String?>(null) }
     // Départ du chien, pour situer les notes dans le temps.
     val notesStart = state.openedSession?.startedAt ?: DemoSession.segments.first().first().time
     val title = when {
@@ -164,6 +172,16 @@ fun TrackScreen(
                             state.quickNotes, state.recordingNotes, state.recording.startedAt,
                             onAdd = { actions.onAddNote(it, null) }, onOther = { showAllNotes = true }, onUndo = actions.onUndoNote,
                         )
+                    } else {
+                        // Le traceur signale ce que le maître-chien devra savoir ; précision proposée pour un danger.
+                        QuickNotesBar(
+                            LAYING_QUICK_NOTES, state.recordingNotes, state.recording.startedAt,
+                            onAdd = { type ->
+                                actions.onAddNote(type, null)
+                                if (type.isWarning) detailFor = type
+                            },
+                            onOther = { showAllNotes = true }, onUndo = actions.onUndoNote,
+                        )
                     }
                 }
                 state.demo -> InfoBar(
@@ -174,11 +192,14 @@ fun TrackScreen(
                     buildString {
                         append("Recherche du ${formatSessionDate(state.openedSession.startedAt)} · ${sourceLabel(state.openedSession.source)}")
                         state.openedSession.trailAgeSeconds?.let { append(" · piste de ${formatDuration(it)}") }
+                        state.openedSession.weather?.let { append("\nMétéo au départ : ${it.summary}") }
+                        state.openedSession.trailWeather?.let { append("\nPendant la pose : ${it.summary}") }
                     },
                     "Fermer" to actions.onCloseSession,
                 )
                 state.openedTrail != null -> InfoBar(
-                    "Piste posée le ${formatSessionDate(state.openedTrail.startedAt)}",
+                    "Piste posée le ${formatSessionDate(state.openedTrail.startedAt)}" +
+                        (state.openedTrail.weather?.let { "\nMétéo pendant la pose : ${it.summary}" } ?: ""),
                     "Lancer la recherche" to { actions.onStartSearchOnTrail(state.openedTrail) },
                     "Fermer" to actions.onCloseSession,
                 )
@@ -208,7 +229,8 @@ fun TrackScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             TrackMap(
                 state.segments, Modifier.fillMaxSize(), trail = state.trailLine,
-                notes = state.notes, onNoteClick = { editedNoteId = it.id },
+                notes = state.notes + state.trailNotes,
+                onNoteClick = { note -> if (state.trailNotes.any { it.id == note.id }) trailNoteId = note.id else editedNoteId = note.id },
             )
             val idle = !state.demo && state.recording == null && state.openedSession == null && state.openedTrail == null && state.segments.isEmpty()
             if (state.tractive == null && state.dogs.isEmpty() && idle) Welcome(actions, Modifier.align(Alignment.Center))
@@ -231,7 +253,23 @@ fun TrackScreen(
         OutcomeDialog(onFinish = { askOutcome = false; actions.onStopRecording(it) }, onDismiss = { askOutcome = false })
     }
     if (showAllNotes) {
-        AllNotesDialog(onPick = { type, comment -> actions.onAddNote(type, comment); showAllNotes = false }, onDismiss = { showAllNotes = false })
+        val laying = state.recording?.kind == RecordingKind.TRAIL
+        AllNotesDialog(
+            onPick = { type, comment ->
+                actions.onAddNote(type, comment)
+                showAllNotes = false
+                if (laying && type.isWarning) detailFor = type
+            },
+            onDismiss = { showAllNotes = false },
+            categories = if (laying) LAYING_CATEGORIES else SEARCH_CATEGORIES,
+        )
+    }
+    detailFor?.let { type ->
+        WarningDetailDialog(type, onSave = { actions.onCommentLastNote(it); detailFor = null }, onDismiss = { detailFor = null })
+    }
+    state.trailNotes.find { it.id == trailNoteId }?.let { note ->
+        val layingStart = state.openedTrail?.startedAt ?: state.trails.find { it.id == state.openedSession?.trailId }?.startedAt
+        TrailNoteDialog(note, layingStart, onDismiss = { trailNoteId = null })
     }
     if (showNotesList) {
         NotesListDialog(state.notes, notesStart, onSelect = { showNotesList = false; editedNoteId = it.id }, onDismiss = { showNotesList = false })
@@ -292,6 +330,8 @@ private fun RecordingBanner(state: UiState, onStop: () -> Unit) {
                         ?: "Sans piste enregistrée",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                // Dangers et points d'attention signalés par le traceur : annoncés, sans montrer le tracé.
+                trail?.warnings?.takeIf { it.isNotEmpty() }?.let { TrailWarnings(it, trail.startedAt) }
             }
             Button(onClick = onStop, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
                 if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -336,6 +376,10 @@ fun TrailChoiceDialog(trails: List<LaidTrail>, now: Long, onChoose: (LaidTrail?)
                                 "%.2f km · %s".format(Locale.FRENCH, trailLength(trail) / 1000, formatSessionDate(trail.startedAt)),
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                            if (trail.warnings.isNotEmpty()) {
+                                val n = trail.warnings.size
+                                Text("⚠ $n signalement${if (n > 1) "s" else ""} du traceur", style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
