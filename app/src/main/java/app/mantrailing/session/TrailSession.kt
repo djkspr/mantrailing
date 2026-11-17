@@ -55,6 +55,8 @@ data class LaidTrail(
     val notes: List<SearchNote> = emptyList(),
     /** Météo au début de la pose (null : pas encore récupérée). */
     val weather: Weather? = null,
+    /** Carnet d'entraînement rempli par le traceur (traceur, lieu, terrain, objet odorant…). */
+    val log: TrainingLog? = null,
 ) {
     /** Dangers et points d'attention à annoncer au maître-chien avant la recherche. */
     val warnings: List<SearchNote> get() = notes.filter { it.type.isWarning }
@@ -95,6 +97,8 @@ data class TrailSession(
     val weather: Weather? = null,
     /** Météo pendant la pose de la piste suivie, pour comparer. */
     val trailWeather: Weather? = null,
+    /** Carnet d'entraînement de la recherche (repris de la piste suivie, complété par le maître-chien). */
+    val log: TrainingLog? = null,
 ) {
     /** Âge de la piste au départ du chien, en secondes. */
     val trailAgeSeconds: Long? get() = trailEndedAt?.let { (startedAt - it).coerceAtLeast(0) }

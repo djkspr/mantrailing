@@ -29,6 +29,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import app.mantrailing.session.Terrain
+import app.mantrailing.session.TrainingLog
 import app.mantrailing.session.Dog
 import app.mantrailing.session.LaidTrail
 import app.mantrailing.session.TrailSession
@@ -78,11 +80,17 @@ fun SessionsScreen(
     var dogFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var spaceFilter by rememberSaveable { mutableStateOf(ALL_SPACES) }
     val filterDog = dogs.find { it.id == dogFilter }
-    fun inSpace(spaceId: String?) = spaceFilter == ALL_SPACES || (spaceId ?: PERSO) == spaceFilter
-    val sessions = remember(allSessions, filterDog, spaceFilter) {
-        (filterDog?.let { sessionsOf(allSessions, it) } ?: allSessions).filter { inSpace(it.spaceId) }
+    // Filtre par terrain du carnet d'entraînement (null : tous) ; proposé seulement pour les terrains déjà notés.
+    var terrainFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    val terrains = remember(allSessions, allTrails) {
+        Terrain.entries.filter { t -> allSessions.any { t in it.log?.terrain.orEmpty() } || allTrails.any { t in it.log?.terrain.orEmpty() } }
     }
-    val trails = remember(allTrails, spaceFilter) { allTrails.filter { inSpace(it.spaceId) } }
+    fun inSpace(spaceId: String?) = spaceFilter == ALL_SPACES || (spaceId ?: PERSO) == spaceFilter
+    fun onTerrain(log: TrainingLog?) = terrainFilter == null || log?.terrain.orEmpty().any { it.name == terrainFilter }
+    val sessions = remember(allSessions, filterDog, spaceFilter, terrainFilter) {
+        (filterDog?.let { sessionsOf(allSessions, it) } ?: allSessions).filter { inSpace(it.spaceId) && onTerrain(it.log) }
+    }
+    val trails = remember(allTrails, spaceFilter, terrainFilter) { allTrails.filter { inSpace(it.spaceId) && onTerrain(it.log) } }
     fun spaceName(spaceId: String?) = spaceId?.let { id -> teams.find { it.id == id }?.name ?: "Équipe" } ?: "Perso"
 
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -109,6 +117,14 @@ fun SessionsScreen(
                 }
             }
         }
+        if (terrains.isNotEmpty()) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).testTag("terrain-filter"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = terrainFilter == null, onClick = { terrainFilter = null }, label = { Text("Tous terrains") })
+                terrains.forEach { t ->
+                    FilterChip(selected = terrainFilter == t.name, onClick = { terrainFilter = t.name }, label = { Text(t.label) })
+                }
+            }
+        }
         if (filterDog != null && sessions.isEmpty()) {
             Text("Pas encore de recherche pour ${filterDog.name}.", style = MaterialTheme.typography.bodyMedium)
         }
@@ -129,7 +145,7 @@ fun SessionsScreen(
                         line1 = (if (trail.id in searched) "Piste travaillée" else "Pas encore travaillée") +
                             spaceSuffix(teams, spaceName(trail.spaceId)),
                         line2 = "%.2f km · pose en %s".format(Locale.FRENCH, trailLength(trail) / 1000, formatDuration(trail.endedAt - trail.startedAt)) +
-                            onlineSuffix(trail.archived),
+                            onlineSuffix(trail.archived) + logSuffix(trail.log),
                         onClick = { actions.onOpenTrail(trail) },
                         onShare = if (teams.isEmpty()) null else {
                             { toMove = PendingMove("Piste posée : partager avec…", trail.spaceId) { actions.onMoveTrail(trail, it) } }
@@ -147,7 +163,7 @@ fun SessionsScreen(
                         line1 = "${session.dogName} · ${sourceLabel(session.source)}" +
                             (session.trailAgeSeconds?.let { " · piste de ${formatDuration(it)}" } ?: "") +
                             spaceSuffix(teams, spaceName(session.spaceId)),
-                        line2 = remember(session) { sessionLine(session) } + onlineSuffix(session.archived),
+                        line2 = remember(session) { sessionLine(session) } + onlineSuffix(session.archived) + logSuffix(session.log),
                         onClick = { actions.onOpen(session) },
                         onShare = if (teams.isEmpty()) null else {
                             { toMove = PendingMove("Recherche : partager avec…", session.spaceId) { actions.onMoveSession(session, it) } }
@@ -187,6 +203,9 @@ fun SessionsScreen(
 }
 
 /** Bilan d'une recherche ; celle qui n'est plus qu'en ligne garde son résumé. */
+/** Résumé du carnet d'entraînement sur une nouvelle ligne (traceur, lieu, terrain, note), s'il y en a un. */
+private fun logSuffix(log: TrainingLog?): String = log?.summary?.takeIf { it.isNotEmpty() }?.let { "\n$it" } ?: ""
+
 fun sessionLine(session: TrailSession): String {
     val duration = formatDuration(session.endedAt - session.startedAt)
     val summary = session.summary

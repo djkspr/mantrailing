@@ -96,6 +96,8 @@ data class TrackActions(
     val onExportPdf: () -> Unit = {},
     /** Fichier GPX de la recherche ou de la piste affichée. */
     val onExportGpx: () -> Unit = {},
+    /** Carnet d'entraînement de la recherche ou de la piste affichée. */
+    val onOpenLog: () -> Unit = {},
     /** Choisir un fichier GPX à importer (Garmin, autre appareil ou appli). */
     val onImportGpx: () -> Unit = {},
     /** Écran d'aide (mode d'emploi). */
@@ -215,13 +217,17 @@ fun TrackScreen(
                         state.openedSession.trailAgeSeconds?.let { append(" · piste de ${formatDuration(it)}") }
                         state.openedSession.weather?.let { append("\nMétéo au départ : ${it.summary}") }
                         state.openedSession.trailWeather?.let { append("\nPendant la pose : ${it.summary}") }
+                        state.openedSession.log?.summary?.takeIf { it.isNotEmpty() }?.let { append("\nCarnet : $it") }
                     },
+                    "Carnet" to actions.onOpenLog,
                     "Fermer" to actions.onCloseSession,
                     export = { ExportMenu(state.exporting, actions) },
                 )
                 state.openedTrail != null -> InfoBar(
                     "Piste posée le ${formatSessionDate(state.openedTrail.startedAt)}" +
-                        (state.openedTrail.weather?.let { "\nMétéo pendant la pose : ${it.summary}" } ?: ""),
+                        (state.openedTrail.weather?.let { "\nMétéo pendant la pose : ${it.summary}" } ?: "") +
+                        (state.openedTrail.log?.summary?.takeIf { it.isNotEmpty() }?.let { "\nCarnet : $it" } ?: ""),
+                    "Carnet" to actions.onOpenLog,
                     "Lancer la recherche" to { actions.onStartSearchOnTrail(state.openedTrail) },
                     "Fermer" to actions.onCloseSession,
                     export = { ExportMenu(state.exporting, actions) },

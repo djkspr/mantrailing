@@ -20,6 +20,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -51,6 +52,9 @@ import app.mantrailing.ui.SettingsActions
 import app.mantrailing.ui.SettingsScreen
 import app.mantrailing.ui.SourceChoiceDialog
 import app.mantrailing.ui.GpxImportDialog
+import app.mantrailing.ui.TrainingLogDialog
+import app.mantrailing.session.SCENT_ARTICLE_SUGGESTIONS
+import app.mantrailing.session.logSuggestions
 import app.mantrailing.ui.HelpScreen
 import app.mantrailing.ui.TrackActions
 import app.mantrailing.ui.TrackScreen
@@ -293,6 +297,7 @@ private fun App(
                 onCloseSession = vm::closeSession,
                 onExportPdf = vm::exportPdf,
                 onExportGpx = vm::exportGpx,
+                onOpenLog = vm::openLogEditor,
                 onFinishTour = vm::finishTour,
                 // Le type MIME d'un .gpx varie selon l'appli qui l'a enregistré : tous les fichiers sont proposés.
                 onImportGpx = { gpxPicker.launch(arrayOf("*/*")) },
@@ -333,6 +338,23 @@ private fun App(
             onDismiss = { askSource = false },
             brand = if (state.collarSourceOf(state.activeDog) == TrackSource.WEENECT) "Weenect" else "Tractive",
         )
+    }
+
+    // Carnet d'entraînement : proposé en fin de pose ou de recherche, ou ouvert avec « Carnet ».
+    state.logEditor?.let { target ->
+        val logs = state.sessions.map { it.log } + state.trails.map { it.log }
+        val initial = if (target.trail) state.trails.find { it.id == target.id }?.log else state.sessions.find { it.id == target.id }?.log
+        key(target) {
+            TrainingLogDialog(
+                initial = initial,
+                forTrail = target.trail,
+                runnerSuggestions = logSuggestions(logs, { it.runner }),
+                scentSuggestions = logSuggestions(logs, { it.scentArticle }, SCENT_ARTICLE_SUGGESTIONS),
+                placeSuggestions = logSuggestions(logs, { it.place }),
+                onSave = vm::saveLog,
+                onDismiss = vm::closeLogEditor,
+            )
+        }
     }
 
     state.gpxImport?.let { track ->
