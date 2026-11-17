@@ -14,7 +14,7 @@ import org.maplibre.android.offline.OfflineRegion
 import org.maplibre.android.offline.OfflineRegionError
 import org.maplibre.android.offline.OfflineRegionStatus
 import org.maplibre.android.offline.OfflineTilePyramidRegionDefinition
-import java.io.File
+import android.util.Log
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -34,6 +34,9 @@ internal val OFFLINE_STYLE_JSON = """
 }
 """.trimIndent()
 
+/** Adresse sous laquelle le style de téléchargement est rangé dans la base de MapLibre (jamais demandée au réseau). */
+internal const val OFFLINE_STYLE_URL = "https://mantrailing.lesbrasseursdupastel.fr/cartes/plan-ign-hors-ligne.json"
+
 @Serializable
 private data class ZoneMeta(val name: String, val createdAt: Long, val s: Double, val w: Double, val n: Double, val e: Double)
 
@@ -49,12 +52,15 @@ class OfflineMaps(private val context: Context) {
         OfflineManager.getInstance(context)
     }
 
-    /** Fichier du style de téléchargement, servi à MapLibre par une adresse file:// (une région exige une URL). */
+    /**
+     * Adresse du style de téléchargement. Une région exige une URL, mais MapLibre refuse « file:// » pour le
+     * téléchargement (« Unable to parse resourceUrl ») : le style est donc rangé directement dans sa base, sous une
+     * adresse web, valable 10 ans ; le téléchargement le trouve là sans passer par le réseau.
+     */
     private fun styleUrl(): String {
-        val file = File(context.filesDir, "maps/offline-plan-style.json")
-        file.parentFile?.mkdirs()
-        if (!file.exists() || file.readText() != OFFLINE_STYLE_JSON) file.writeText(OFFLINE_STYLE_JSON)
-        return "file://${file.absolutePath}"
+        val now = System.currentTimeMillis() / 1000
+        manager.putResourceWithUrl(OFFLINE_STYLE_URL, OFFLINE_STYLE_JSON.encodeToByteArray(), now, now + 10L * 365 * 86_400, null, false)
+        return OFFLINE_STYLE_URL
     }
 
     suspend fun raiseAmbientCache() = withContext(Dispatchers.Main) {
@@ -138,7 +144,9 @@ class OfflineMaps(private val context: Context) {
 
             // Erreurs passagères (tuile absente, réseau coupé) : MapLibre réessaie seul ; la progression reprend
             // avec le réseau, et « Annuler » reste possible.
-            override fun onError(error: OfflineRegionError) = Unit
+            override fun onError(error: OfflineRegionError) {
+                Log.w("OfflineMaps", "Téléchargement : ${error.reason} ${error.message}")
+            }
 
             override fun mapboxTileCountLimitExceeded(limit: Long) {
                 if (finished) return
