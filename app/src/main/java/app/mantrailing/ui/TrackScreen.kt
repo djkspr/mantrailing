@@ -449,7 +449,8 @@ fun CorridorBanner(widthMeters: Int, status: CorridorStatus?) {
     Surface(
         color = if (outside) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondaryContainer,
         shape = MaterialTheme.shapes.small,
-        modifier = Modifier.fillMaxWidth().testTag("corridor-status"),
+        // Lu d'un bloc par le lecteur d'écran (couloir, distance, alerte).
+        modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.testTag("corridor-status"),
     ) {
         Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
             Text(
