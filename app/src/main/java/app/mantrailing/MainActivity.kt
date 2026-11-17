@@ -51,6 +51,7 @@ import app.mantrailing.ui.SettingsActions
 import app.mantrailing.ui.SettingsScreen
 import app.mantrailing.ui.SourceChoiceDialog
 import app.mantrailing.ui.GpxImportDialog
+import app.mantrailing.ui.HelpScreen
 import app.mantrailing.ui.TrackActions
 import app.mantrailing.ui.TrackScreen
 
@@ -93,7 +94,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { HOME, SETTINGS, SESSIONS }
+private enum class Screen { HOME, SETTINGS, SESSIONS, HELP }
 
 @Composable
 private fun App(
@@ -107,6 +108,12 @@ private fun App(
     val shownUpdate = if (updateLater && update is UpdateState.Available) UpdateState.None else update
     val context = LocalContext.current
     var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
+    // Écran d'où l'aide a été ouverte (accueil ou paramètres) : le retour y ramène.
+    var helpFrom by rememberSaveable { mutableStateOf(Screen.HOME) }
+    fun openHelp(from: Screen) {
+        helpFrom = from
+        screen = Screen.HELP
+    }
     var askSource by remember { mutableStateOf(false) }
     var askTrail by remember { mutableStateOf(false) }
     // En attente de l'autorisation de localisation : pose de piste, ou recherche (choix à mémoriser, piste suivie).
@@ -202,6 +209,11 @@ private fun App(
 
     when {
         !state.ready -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        screen == Screen.HELP -> {
+            BackHandler { screen = helpFrom }
+            // TODO tour : onReplayTour = { vm.replayTour(); screen = Screen.HOME } quand le tour guidé sera fusionné.
+            HelpScreen(onBack = { screen = helpFrom })
+        }
         screen == Screen.SETTINGS -> {
             BackHandler { screen = Screen.HOME }
             SettingsScreen(
@@ -221,6 +233,7 @@ private fun App(
                     onSyncWeenect = vm::syncWeenectDogs,
                     onTrackSource = vm::setTrackSource,
                     onQuickNotes = vm::setQuickNotes,
+                    onOpenHelp = { openHelp(Screen.SETTINGS) },
                     cloud = CloudActions(
                         // Le choix du compte Google s'affiche au-dessus de l'activité.
                         onSignIn = { vm.signInCloud(context) },
@@ -276,6 +289,7 @@ private fun App(
                 onStartSearchOnTrail = { beginSearch(it.id) },
                 onStopRecording = vm::stopRecording,
                 onOpenSessions = { screen = Screen.SESSIONS },
+                onOpenHelp = { openHelp(Screen.HOME) },
                 onCloseSession = vm::closeSession,
                 onExportPdf = vm::exportPdf,
                 // Le type MIME d'un .gpx varie selon l'appli qui l'a enregistré : tous les fichiers sont proposés.

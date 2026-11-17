@@ -95,6 +95,8 @@ data class TrackActions(
     val onExportPdf: () -> Unit = {},
     /** Choisir un fichier GPX à importer (Garmin, autre appareil ou appli). */
     val onImportGpx: () -> Unit = {},
+    /** Écran d'aide (mode d'emploi). */
+    val onOpenHelp: () -> Unit = {},
     val onAddNote: (NoteType, String?) -> Unit = { _, _ -> },
     val onUndoNote: () -> Unit = {},
     val onUpdateNote: (SearchNote) -> Unit = {},
@@ -163,6 +165,7 @@ fun TrackScreen(
                             DropdownMenuItem(text = { Text("Séance de démonstration") }, onClick = { menuOpen = false; actions.onStartDemo() })
                         }
                         DropdownMenuItem(text = { Text("Paramètres") }, onClick = { menuOpen = false; actions.onOpenSettings() })
+                        DropdownMenuItem(text = { Text("Aide") }, onClick = { menuOpen = false; actions.onOpenHelp() })
                     }
                 }
             }

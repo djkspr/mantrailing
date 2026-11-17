@@ -72,6 +72,8 @@ data class SettingsActions(
     val onSyncWeenect: () -> Unit = {},
     val onTrackSource: (TrackSource) -> Unit = {},
     val onQuickNotes: (List<NoteType>) -> Unit = {},
+    /** Écran d'aide (mode d'emploi). */
+    val onOpenHelp: () -> Unit = {},
     val cloud: CloudActions = CloudActions(),
 )
 
@@ -141,7 +143,7 @@ fun SettingsScreen(state: UiState, actions: SettingsActions, initialPage: Settin
             Text(page?.title ?: "Paramètres", style = MaterialTheme.typography.headlineSmall)
         }
         when (page) {
-            null -> SettingsMenu(state, now) { page = it }
+            null -> SettingsMenu(state, now, actions.onOpenHelp) { page = it }
             SettingsPage.DOGS -> DogsSetting(
                 state.dogs, state.activeDogId, actions.onSelectDog, actions.onAddDog, actions.onRenameDog, actions.onDeleteDog,
                 teams = state.cloud.teams, onMove = actions.onMoveDog,
@@ -164,7 +166,7 @@ fun SettingsScreen(state: UiState, actions: SettingsActions, initialPage: Settin
 }
 
 @Composable
-private fun SettingsMenu(state: UiState, now: Long, onOpen: (SettingsPage) -> Unit) {
+private fun SettingsMenu(state: UiState, now: Long, onOpenHelp: () -> Unit, onOpen: (SettingsPage) -> Unit) {
     Column {
         SettingsPage.entries.forEachIndexed { i, page ->
             if (i > 0) HorizontalDivider()
@@ -183,6 +185,18 @@ private fun SettingsMenu(state: UiState, now: Long, onOpen: (SettingsPage) -> Un
                 }
                 Text("›", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+        // Mode d'emploi : ouvre l'écran d'aide, hors des rubriques de réglages.
+        HorizontalDivider()
+        Row(
+            Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpenHelp).padding(vertical = 14.dp).testTag("settings-help"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Aide", style = MaterialTheme.typography.titleMedium)
+                Text("Mode d'emploi, définitions, tour guidé", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("›", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
