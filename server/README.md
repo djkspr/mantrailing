@@ -81,4 +81,4 @@ affichera la sauvegarde en ligne.
 ```
 
 Si `package.json` a changé, le script le signale : « Run NPM Install » puis « Restart » dans Setup Node.js App.
-Pour changer un mot de passe : modifier `server/.env.production`, puis `.serverdeploy.ps1 -SkipTests`.
+Pour changer un mot de passe : modifier `server/.env.production`, puis `.\server\deploy.ps1 -SkipTests`.
