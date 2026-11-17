@@ -60,7 +60,6 @@ data class CloudActions(
 fun CloudSetting(cloud: CloudState, now: Long, actions: CloudActions) {
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Sauvegarde en ligne", style = MaterialTheme.typography.titleMedium)
         if (!cloud.available) {
             Text("Pas encore disponible dans cette version.", style = MaterialTheme.typography.bodySmall)
             return@Column
@@ -96,7 +95,6 @@ fun CloudSetting(cloud: CloudState, now: Long, actions: CloudActions) {
                 }
             }
         }
-        TeamsSetting(cloud, actions)
     }
     if (confirmDelete) {
         AlertDialog(
@@ -135,12 +133,11 @@ private fun KeepDaysChoice(keepDays: Int?, onChange: (Int?) -> Unit) {
 
 /** Équipes : famille, club, binôme… Chacune ne voit que ce qui a été fait en son nom. */
 @Composable
-private fun TeamsSetting(cloud: CloudState, actions: CloudActions) {
+fun TeamsSetting(cloud: CloudState, actions: CloudActions) {
     var creating by rememberSaveable { mutableStateOf(false) }
     var joining by rememberSaveable { mutableStateOf(false) }
     var leaving by remember { mutableStateOf<Team?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Équipes", style = MaterialTheme.typography.titleMedium)
         Text(
             "Une équipe voit uniquement les pistes, recherches et chiens faits ou partagés en son nom ; " +
                 "votre espace perso et vos autres équipes lui restent invisibles.",

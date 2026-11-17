@@ -17,6 +17,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.mantrailing.TimeRange
+import app.mantrailing.CloudState
 import app.mantrailing.UiState
 import app.mantrailing.session.Dog
 import app.mantrailing.demo.DemoSession
@@ -207,7 +208,7 @@ class ScreensTest {
     @Test
     fun parametres_notes_rapides_six_au_maximum() {
         val changes = mutableListOf<List<NoteType>>()
-        rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onQuickNotes = { changes += it })) } }
+        rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onQuickNotes = { changes += it }), SettingsPage.NOTES) } }
 
         rule.onNodeWithText("Boutons affichés pendant la recherche (6/6)", substring = true).assertExists()
         rule.onNodeWithTag("quick-WIND").assertIsNotEnabled() // déjà 6 notes rapides
@@ -565,7 +566,7 @@ class ScreensTest {
     @Test
     fun parametres_source_de_la_trace() {
         val chosen = mutableListOf<TrackSource>()
-        rule.setContent { MaterialTheme { SettingsScreen(connected, SettingsActions(onTrackSource = { chosen += it })) } }
+        rule.setContent { MaterialTheme { SettingsScreen(connected, SettingsActions(onTrackSource = { chosen += it }), SettingsPage.COLLARS) } }
 
         rule.onNodeWithText("Trace du chien").performScrollTo().assertIsDisplayed()
         rule.onNodeWithText("GPS du téléphone").performScrollTo().performClick()
@@ -577,7 +578,7 @@ class ScreensTest {
     @Test
     fun parametres_collier_indisponible_sans_compte() {
         val chosen = mutableListOf<TrackSource>()
-        rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onTrackSource = { chosen += it })) } }
+        rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onTrackSource = { chosen += it }), SettingsPage.COLLARS) } }
 
         rule.onNodeWithText("Connecte d'abord un compte Tractive ci-dessus.").performScrollTo().assertIsDisplayed()
         rule.onNodeWithText("Collier Tractive").performScrollTo().performClick()
@@ -590,9 +591,8 @@ class ScreensTest {
     @Test
     fun parametres_connexion_activee_une_fois_les_champs_remplis() {
         var sent: Pair<String, String>? = null
-        rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onLogin = { e, p -> sent = e to p })) } }
+        rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onLogin = { e, p -> sent = e to p }), SettingsPage.COLLARS) } }
 
-        rule.onNodeWithText("Politique de confidentialité").performScrollTo().assertIsDisplayed()
         rule.onNodeWithText("Se connecter").assertIsNotEnabled()
         rule.onNodeWithTag("email").performTextInput("moi@example.com")
         rule.onNodeWithText("Se connecter").assertIsNotEnabled()
@@ -605,7 +605,7 @@ class ScreensTest {
     @Test
     fun parametres_affichent_le_message_d_erreur() {
         rule.setContent {
-            MaterialTheme { SettingsScreen(UiState(ready = true, message = "Email ou mot de passe incorrect."), SettingsActions()) }
+            MaterialTheme { SettingsScreen(UiState(ready = true, message = "Email ou mot de passe incorrect."), SettingsActions(), SettingsPage.COLLARS) }
         }
         rule.onNodeWithText("Email ou mot de passe incorrect.").assertIsDisplayed()
     }
@@ -615,9 +615,9 @@ class ScreensTest {
     @Test
     fun parametres_liste_des_chiens_et_choix_du_chien_qui_cherche() {
         val selected = mutableListOf<Dog>()
-        rule.setContent { MaterialTheme { SettingsScreen(connected, SettingsActions(onSelectDog = { selected += it })) } }
+        rule.setContent { MaterialTheme { SettingsScreen(connected, SettingsActions(onSelectDog = { selected += it }), SettingsPage.DOGS) } }
 
-        rule.onNodeWithText("Mes chiens").assertIsDisplayed()
+        rule.onNodeWithText("Le chien coché est celui qui cherche", substring = true).assertIsDisplayed()
         rule.onNodeWithText("Porte un collier Tractive").assertIsDisplayed()
         rule.onNodeWithText("Sans collier : trace au GPS du téléphone").assertIsDisplayed()
         rule.onNodeWithText("Nala").performClick()
@@ -635,6 +635,7 @@ class ScreensTest {
                 SettingsScreen(
                     connected,
                     SettingsActions(onAddDog = { added += it }, onRenameDog = { d, n -> renamed += d to n }, onDeleteDog = { deleted += it }),
+                    SettingsPage.DOGS,
                 )
             }
         }
@@ -722,7 +723,7 @@ class ScreensTest {
         var back = 0
         var syncs = 0
         rule.setContent {
-            MaterialTheme { SettingsScreen(connected, SettingsActions(onLogout = { logout++ }, onBack = { back++ }, onSyncDogs = { syncs++ })) }
+            MaterialTheme { SettingsScreen(connected, SettingsActions(onLogout = { logout++ }, onBack = { back++ }, onSyncDogs = { syncs++ }), SettingsPage.COLLARS) }
         }
 
         rule.onNodeWithText("Compte Tractive connecté").performScrollTo().assertIsDisplayed()
@@ -730,9 +731,44 @@ class ScreensTest {
         rule.onNodeWithText("Actualiser les chiens").performClick()
         assertEquals(1, syncs)
         rule.onNodeWithText("Se déconnecter").performClick()
+        // Retour : d'abord au menu des paramètres, puis à l'accueil.
+        rule.onNodeWithContentDescription("Retour").performClick()
+        rule.onNodeWithText("Paramètres").assertIsDisplayed()
+        assertEquals(0, back)
         rule.onNodeWithContentDescription("Retour").performClick()
 
         assertEquals(1, logout)
         assertEquals(1, back)
+    }
+
+    @Test
+    fun parametres_menu_court_qui_resume_chaque_rubrique() {
+        rule.setContent { MaterialTheme { SettingsScreen(connected.copy(cloud = CloudState(available = true)), SettingsActions()) } }
+
+        // Une ligne par rubrique, avec son état ; aucun réglage affiché tant qu'on n'ouvre pas la rubrique.
+        rule.onNodeWithText("Rex (actif), Nala").assertIsDisplayed()
+        rule.onNodeWithText("Tractive connecté · trace par le collier").assertIsDisplayed()
+        rule.onNodeWithText("Désactivée").assertIsDisplayed()
+        rule.onNodeWithText("6 boutons pendant la recherche").assertIsDisplayed()
+        rule.onNodeWithTag("settings-about").assertIsDisplayed()
+        rule.onNodeWithTag("tractive-account").assertDoesNotExist()
+
+        rule.onNodeWithTag("settings-collars").performClick()
+        rule.onNodeWithText("Colliers GPS").assertIsDisplayed()
+        rule.onNodeWithTag("tractive-account").assertIsDisplayed()
+        rule.onNodeWithText("Trace du chien").performScrollTo().assertIsDisplayed()
+
+        rule.onNodeWithContentDescription("Retour").performClick()
+        rule.onNodeWithTag("settings-about").performClick()
+        rule.onNodeWithText("Politique de confidentialité").assertIsDisplayed()
+    }
+
+    @Test
+    fun parametres_equipes_demandent_la_sauvegarde_en_ligne() {
+        rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true, cloud = CloudState(available = true)), SettingsActions(), SettingsPage.TEAMS) } }
+
+        rule.onNodeWithText("activez-la d'abord", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Sauvegarde en ligne").performClick()
+        rule.onNodeWithText("Pistes, recherches et chiens sont copiés", substring = true).assertIsDisplayed()
     }
 }

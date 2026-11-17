@@ -228,7 +228,6 @@ fun NoteEditDialog(note: SearchNote, startedAt: Long, onSave: (SearchNote) -> Un
 @Composable
 fun QuickNotesSetting(selected: List<NoteType>, onChange: (List<NoteType>) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text("Notes rapides", style = MaterialTheme.typography.titleMedium)
         Text(
             "Boutons affichés pendant la recherche (${selected.size}/$MAX_QUICK_NOTES). Les autres restent accessibles par « Autre… ».",
             style = MaterialTheme.typography.bodySmall,

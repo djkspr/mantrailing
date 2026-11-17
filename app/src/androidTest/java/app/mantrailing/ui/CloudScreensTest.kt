@@ -42,10 +42,10 @@ class CloudScreensTest {
     private val club = Team("t-club", "Club du Gâtinais", "u3", mapOf("u1" to "Moi", "u3" to "Paul", "u4" to "Léa"))
     private val signedIn = CloudState(available = true, email = "moi@example.com", teams = listOf(famille, club), lastSyncAt = 0)
 
-    private fun settings(cloud: CloudState, actions: CloudActions = CloudActions(), dogs: List<Dog> = emptyList(), onMoveDog: (Dog, String?) -> Unit = { _, _ -> }) =
+    private fun settings(cloud: CloudState, actions: CloudActions = CloudActions(), dogs: List<Dog> = emptyList(), onMoveDog: (Dog, String?) -> Unit = { _, _ -> }, page: SettingsPage = SettingsPage.BACKUP) =
         rule.setContent {
             MaterialTheme {
-                SettingsScreen(UiState(ready = true, cloud = cloud, dogs = dogs), SettingsActions(cloud = actions, onMoveDog = onMoveDog))
+                SettingsScreen(UiState(ready = true, cloud = cloud, dogs = dogs), SettingsActions(cloud = actions, onMoveDog = onMoveDog), page)
             }
         }
 
@@ -103,6 +103,7 @@ class CloudScreensTest {
         settings(
             signedIn,
             CloudActions(onInvite = { invited += it }, onLeave = { left += it }, onCreateTeam = { created += it }, onJoin = { joined += it }),
+            page = SettingsPage.TEAMS,
         )
 
         rule.onNodeWithText("Membres : Marie, Moi").performScrollTo().assertIsDisplayed()
@@ -138,7 +139,7 @@ class CloudScreensTest {
 
     @Test
     fun code_d_invitation_affiche() {
-        settings(signedIn.copy(invite = Invite("Famille", "ABCDEFGH")))
+        settings(signedIn.copy(invite = Invite("Famille", "ABCDEFGH")), page = SettingsPage.TEAMS)
         rule.onNodeWithTag("invite-code").assertIsDisplayed()
         rule.onNodeWithText("ABCD-EFGH").assertIsDisplayed()
         rule.onNodeWithText("Envoyer").assertIsEnabled()
@@ -162,7 +163,7 @@ class CloudScreensTest {
     fun chien_partage_avec_une_equipe() {
         val moved = mutableListOf<Pair<Dog, String?>>()
         val rex = Dog("d1", "Rex")
-        settings(signedIn, dogs = listOf(rex, Dog("d2", "Nala", spaceId = "t-fam")), onMoveDog = { d, s -> moved += d to s })
+        settings(signedIn, dogs = listOf(rex, Dog("d2", "Nala", spaceId = "t-fam")), onMoveDog = { d, s -> moved += d to s }, page = SettingsPage.DOGS)
 
         rule.onNodeWithText("Partagé avec Famille").assertIsDisplayed()
         rule.onNodeWithContentDescription("Actions pour Rex").performClick()

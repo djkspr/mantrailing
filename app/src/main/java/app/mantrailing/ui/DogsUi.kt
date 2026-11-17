@@ -63,7 +63,6 @@ fun DogsSetting(
     var moved by remember { mutableStateOf<Dog?>(null) }
     var menuFor by remember { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Mes chiens", style = MaterialTheme.typography.titleMedium)
         Text(
             if (dogs.isEmpty()) "Ajoute tes chiens : chacun garde ses recherches. Ceux de ton compte Tractive sont ajoutés à la connexion."
             else "Le chien coché est celui qui cherche ; il se change aussi depuis l'accueil.",

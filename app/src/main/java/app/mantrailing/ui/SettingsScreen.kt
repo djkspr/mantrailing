@@ -1,5 +1,7 @@
 package app.mantrailing.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,6 +46,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.RadioButton
 import androidx.compose.ui.semantics.Role
+import app.mantrailing.BuildConfig
 import app.mantrailing.UiState
 import app.mantrailing.session.NoteType
 import app.mantrailing.session.TrackSource
@@ -68,24 +71,122 @@ data class SettingsActions(
     val cloud: CloudActions = CloudActions(),
 )
 
+/** Rubriques des paramètres : chacune a sa page, le menu les résume en une ligne. */
+enum class SettingsPage(val title: String, val tag: String) {
+    DOGS("Chiens", "dogs"),
+    COLLARS("Colliers GPS", "collars"),
+    BACKUP("Sauvegarde en ligne", "backup"),
+    TEAMS("Équipes", "teams"),
+    NOTES("Notes rapides", "notes"),
+    ABOUT("À propos", "about"),
+}
+
+/** Résumé d'une rubrique, affiché sous son nom dans le menu. */
+fun settingsSummary(page: SettingsPage, state: UiState, now: Long): String = when (page) {
+    SettingsPage.DOGS -> when {
+        state.dogs.isEmpty() -> "Aucun chien : ajoutez-les pour séparer leurs recherches"
+        else -> state.dogs.joinToString { if (it.id == state.activeDogId && state.dogs.size > 1) "${it.name} (actif)" else it.name }
+    }
+    SettingsPage.COLLARS -> {
+        val collars = state.tractive != null && state.dogs.any { it.hasCollar }
+        val source = if (collars && state.trackSource != TrackSource.PHONE) "trace par le collier" else "trace par le téléphone"
+        (if (state.tractive != null) "Tractive connecté" else "Aucun collier connecté") + " · $source"
+    }
+    SettingsPage.BACKUP -> when {
+        !state.cloud.available -> "Pas encore disponible"
+        state.cloud.email == null -> "Désactivée"
+        else -> "Activée" + (if (state.cloud.wifiOnly) " (Wi-Fi seulement)" else "") + " · " +
+            syncStatus(state.cloud, now).removeSuffix(".").replaceFirstChar { it.lowercase() }
+    }
+    SettingsPage.TEAMS -> when {
+        state.cloud.email == null -> "Avec la sauvegarde en ligne : famille, club…"
+        state.cloud.teams.isEmpty() -> "Aucune équipe"
+        else -> state.cloud.teams.joinToString { it.name }
+    }
+    SettingsPage.NOTES -> "${state.quickNotes.size} bouton${if (state.quickNotes.size > 1) "s" else ""} pendant la recherche"
+    SettingsPage.ABOUT -> "Confidentialité, version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+}
+
+/**
+ * Paramètres : un menu court (une ligne par rubrique, avec son état), chaque rubrique sur sa propre page.
+ * [initialPage] : page ouverte directement (tests, scènes de présentation).
+ */
 @Composable
-fun SettingsScreen(state: UiState, actions: SettingsActions) {
+fun SettingsScreen(state: UiState, actions: SettingsActions, initialPage: SettingsPage? = null) {
+    var page by rememberSaveable { mutableStateOf(initialPage) }
+    // Retour du téléphone : d'une rubrique vers le menu.
+    BackHandler(enabled = page != null) { page = null }
+    // Heure relue chaque minute pour « synchronisé il y a… ».
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            now = System.currentTimeMillis()
+        }
+    }
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = actions.onBack, modifier = Modifier.semantics { contentDescription = "Retour" }) { Text("←", style = MaterialTheme.typography.headlineSmall) }
-            Text("Paramètres", style = MaterialTheme.typography.headlineSmall)
+            TextButton(
+                onClick = { if (page != null) page = null else actions.onBack() },
+                modifier = Modifier.semantics { contentDescription = "Retour" },
+            ) { Text("←", style = MaterialTheme.typography.headlineSmall) }
+            Text(page?.title ?: "Paramètres", style = MaterialTheme.typography.headlineSmall)
         }
+        when (page) {
+            null -> SettingsMenu(state, now) { page = it }
+            SettingsPage.DOGS -> DogsSetting(
+                state.dogs, state.activeDogId, actions.onSelectDog, actions.onAddDog, actions.onRenameDog, actions.onDeleteDog,
+                teams = state.cloud.teams, onMove = actions.onMoveDog,
+            )
+            SettingsPage.COLLARS -> CollarsSetting(state, actions)
+            SettingsPage.BACKUP -> CloudSetting(state.cloud, now, actions.cloud)
+            SettingsPage.TEAMS -> if (state.cloud.email == null) {
+                Text(
+                    "Les équipes passent par la sauvegarde en ligne : activez-la d'abord pour créer ou rejoindre une équipe.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedButton(onClick = { page = SettingsPage.BACKUP }) { Text("Sauvegarde en ligne") }
+            } else {
+                TeamsSetting(state.cloud, actions.cloud)
+            }
+            SettingsPage.NOTES -> QuickNotesSetting(state.quickNotes, actions.onQuickNotes)
+            SettingsPage.ABOUT -> AboutSetting()
+        }
+    }
+}
 
-        DogsSetting(
-            state.dogs, state.activeDogId, actions.onSelectDog, actions.onAddDog, actions.onRenameDog, actions.onDeleteDog,
-            teams = state.cloud.teams, onMove = actions.onMoveDog,
-        )
+@Composable
+private fun SettingsMenu(state: UiState, now: Long, onOpen: (SettingsPage) -> Unit) {
+    Column {
+        SettingsPage.entries.forEachIndexed { i, page ->
+            if (i > 0) HorizontalDivider()
+            Row(
+                Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpen(page) }.padding(vertical = 14.dp).testTag("settings-${page.tag}"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(page.title, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        settingsSummary(page, state, now),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                    )
+                }
+                Text("›", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
 
-        HorizontalDivider()
-        Text("Collier GPS Tractive", style = MaterialTheme.typography.titleMedium)
+/** Colliers GPS : comptes des fabricants, et la source utilisée pour la trace du chien. */
+@Composable
+private fun CollarsSetting(state: UiState, actions: SettingsActions) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text("Tractive", style = MaterialTheme.typography.titleMedium)
         if (state.tractive == null) {
             LoginForm(state, actions.onLogin)
         } else {
@@ -106,26 +207,16 @@ fun SettingsScreen(state: UiState, actions: SettingsActions) {
                 }
             }
         }
-
-        HorizontalDivider()
-        // Heure relue chaque minute pour « dernière synchronisation il y a… ».
-        var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-        LaunchedEffect(Unit) {
-            while (true) {
-                delay(60_000)
-                now = System.currentTimeMillis()
-            }
-        }
-        CloudSetting(state.cloud, now, actions.cloud)
-
         HorizontalDivider()
         TrackSourceSetting(state, actions.onTrackSource)
+    }
+}
 
-        HorizontalDivider()
-        QuickNotesSetting(state.quickNotes, actions.onQuickNotes)
-
-        HorizontalDivider()
-        val uriHandler = LocalUriHandler.current
+@Composable
+private fun AboutSetting() {
+    val uriHandler = LocalUriHandler.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Mantrailing ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.titleMedium)
         TextButton(onClick = { uriHandler.openUri(PRIVACY_POLICY_URL) }) { Text("Politique de confidentialité") }
         Text(
             "Application indépendante, ni affiliée à Tractive, ni approuvée par Tractive.",

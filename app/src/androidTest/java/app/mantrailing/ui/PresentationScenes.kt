@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -124,7 +125,7 @@ class PresentationScenes {
 
         // Sauvegarde en ligne : Wi-Fi seulement, ce qui reste sur le téléphone.
         pause(1.0)
-        rule.onNodeWithText("Sauvegarde en ligne").performScrollTo()
+        rule.onNodeWithTag("settings-backup").performClick()
         pause(3.0)
         rule.onNodeWithTag("keep-days").performScrollTo()
         rule.onNodeWithText("90 jours").performClick()
@@ -133,6 +134,9 @@ class PresentationScenes {
         pause(2.5)
 
         // Équipes : membres, invitation par code.
+        rule.onNodeWithContentDescription("Retour").performClick()
+        pause(1.0)
+        rule.onNodeWithTag("settings-teams").performClick()
         rule.onNodeWithTag("team-t-club").performScrollTo()
         pause(3.0)
         rule.onAllNodesWithText("Inviter")[1].performClick()
