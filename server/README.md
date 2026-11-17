@@ -71,7 +71,8 @@ Configuration locale : `server/.env.local` (non versionné, voir `.env.example`)
 3. **Application Node** — cPanel › Setup Node.js App › Create Application : Node.js 22 ou plus, mode Production,
    Application root `mantrailing/api`, Application URL `mantrailing.lesbrasseursdupastel.fr`, startup file
    `src/index.js`. Aucune variable à saisir dans le panneau.
-4. **Compte FTP dédié** — cPanel › Comptes FTP : un compte dont le répertoire est **limité à `mantrailing/api`** : le
+4. **Compte FTP dédié** — cPanel › Comptes FTP : un compte dont le répertoire est **limité à `mantrailing`** (le
+   déploiement envoie dans son sous-dossier `api`, option `-RemotePath`) : le
    déploiement ne voit rien d'autre sur l'hébergement.
 5. **Ce poste** — une fois :
 

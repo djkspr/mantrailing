@@ -35,9 +35,9 @@ param(
     [string]$Version = "tested",
     # Ne PAS mettre à jour le serveur après l'envoi : vérifie seulement la version en ligne.
     [switch]$NoServerUpdate,
-    # Dossier de l'application Node (« Application root », mantrailing/api), vu du compte FTP : « / » pour un compte
-    # limité à ce dossier ; « /mantrailing/api » pour un compte qui voit tout l'hébergement.
-    [string]$RemotePath = "/",
+    # Dossier de l'application Node (« Application root », mantrailing/api), vu du compte FTP : le compte FTP dédié
+    # s'ouvre sur mantrailing/, d'où « /api ».
+    [string]$RemotePath = "/api",
     # Adresse publique de l'API ; par défaut celle de l'appli (gradle.properties, mantrailing.apiUrl).
     [string]$ApiUrl = ""
 )
@@ -113,6 +113,14 @@ if (-not $ApiUrl) {
     $ApiUrl = ($line -replace '^\s*mantrailing\.apiUrl\s*=\s*', '').Trim().TrimEnd('/')
 }
 if (-not $ApiUrl) { throw "Adresse de l'API inconnue : renseigne mantrailing.apiUrl dans gradle.properties (ou -ApiUrl)." }
+# Variables du poste : celles de la fenêtre, sinon celles du profil Windows (enregistrées par set-deploy-env.ps1 après
+# l'ouverture de ce terminal, que Windows ne lui transmet pas).
+foreach ($name in 'MANTRAILING_FTP_HOST', 'MANTRAILING_FTP_USER', 'MANTRAILING_FTP_PASS', 'MANTRAILING_DEPLOY_SECRET') {
+    if (-not [Environment]::GetEnvironmentVariable($name)) {
+        $saved = [Environment]::GetEnvironmentVariable($name, 'User')
+        if ($saved) { Set-Item "env:$name" $saved }
+    }
+}
 $missingFtp = @("MANTRAILING_FTP_HOST", "MANTRAILING_FTP_USER", "MANTRAILING_FTP_PASS") | Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
 if ($missingFtp) { throw "Variables absentes : $($missingFtp -join ', '). Lance .\server\set-deploy-env.ps1." }
 # Paquet « WinSCP .NET assembly » (build netstandard2.0) extrait dans tools/winscp-automation (non versionné).
