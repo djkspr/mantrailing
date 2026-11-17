@@ -136,6 +136,21 @@ test('o2switch (CloudLinux) : jamais de vrai dossier node_modules, « Run NPM In
   }
 });
 
+test('o2switch : installation par cloudlinux-selector (jamais un npm ordinaire, qui casserait le lien)', () => {
+  const { installCommand } = require('../src/deploy');
+  const onO2switch = installCommand({
+    appRoot: '/home/gepi9588/mantrailing/api',
+    selector: '/usr/bin/cloudlinux-selector',
+    home: '/home/gepi9588',
+  });
+  assert.equal(onO2switch.cmd, '/usr/bin/cloudlinux-selector');
+  assert.deepEqual(onO2switch.args, ['install-modules', '--json', '--interpreter', 'nodejs', '--app-root', 'mantrailing/api']);
+
+  const elsewhere = installCommand({ appRoot: root, selector: null });
+  assert.match(path.basename(elsewhere.cmd), /^npm/);
+  assert.deepEqual(elsewhere.args, ['install', '--omit=dev', '--no-audit', '--no-fund']);
+});
+
 test('sans secret configuré : routes absentes', async () => {
   const app = express();
   app.use('/deploy', createDeployRouter({ appRoot: root, secret: undefined }));

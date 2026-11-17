@@ -182,7 +182,13 @@ function Send-Api {
     $serverDir = Join-Path $sourceRoot 'server'
     $commit = (git -C $sourceRoot rev-parse --short HEAD).Trim()
     if ($Version -eq 'actuel' -and (git -C $sourceRoot status --porcelain -- server)) { $commit += '-modifié' }
-    $script:DeployedVersion = [ordered]@{ commit = $commit; builtAt = (Get-Date).ToUniversalTime().ToString('o') }
+    # deployId : identifiant unique de cet envoi, comparé tel quel (une date serait convertie par Invoke-RestMethod et ne
+    # serait plus égale à son texte d'origine).
+    $script:DeployedVersion = [ordered]@{
+        commit   = $commit
+        builtAt  = (Get-Date).ToUniversalTime().ToString('o')
+        deployId = [guid]::NewGuid().ToString('N')
+    }
     $versionFile = Join-Path $serverDir 'src\version.json'
     $script:DeployedVersion | ConvertTo-Json | Set-Content -Encoding utf8NoBOM $versionFile
     $session = Open-Ftp
@@ -268,7 +274,7 @@ function Wait-ApiVersion([int]$Seconds) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     do {
         try { $running = Invoke-RestMethod -Uri "$ApiUrl/version" -TimeoutSec 15 } catch { $running = $null }
-        $ok = $running -and $running.commit -eq $script:DeployedVersion.commit -and $running.builtAt -eq $script:DeployedVersion.builtAt
+        $ok = $running -and $running.commit -eq $script:DeployedVersion.commit -and $running.deployId -eq $script:DeployedVersion.deployId
         if (-not $ok) { Start-Sleep -Seconds 3 }
     } while (-not $ok -and (Get-Date) -lt $deadline)
     if ($ok) { Write-Host "L'API tourne avec la version envoyée ($($script:DeployedVersion.commit)) — démarrée le $($running.startedAt)." -ForegroundColor Green }

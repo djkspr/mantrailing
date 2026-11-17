@@ -5,7 +5,8 @@
 // Protégé par un secret (DEPLOY_SECRET côté serveur, MANTRAILING_DEPLOY_SECRET sur le poste qui déploie), envoyé dans
 // l'en-tête x-deploy-secret. Sans secret configuré, ces routes n'existent pas (404).
 //
-// POST /deploy/npm-install { force? } : lance « npm install --omit=dev » si package-lock.json diffère de la dernière
+// POST /deploy/npm-install { force? } : installe les dépendances (cloudlinux-selector sur o2switch, sinon npm) si
+//   package-lock.json diffère de la dernière
 //   installation réussie (ou force) ; répond tout de suite.
 // GET  /deploy/npm-install : état de l'installation (fichier tmp/npm-install.json).
 // POST /deploy/run-migrations : migrations (structure, migrations/) puis seeds (données, seeds/) avec knex, comme
@@ -33,8 +34,22 @@ function readJson(file) {
   }
 }
 
-/** Commande npm : celle de l'environnement Node de l'appli (même dossier que node), sinon celle du PATH. */
-function defaultNpmCommand() {
+/** Outil de CloudLinux (o2switch) qui gère l'environnement Node des applis, s'il est installé. */
+function findCloudLinuxSelector() {
+  return ['/usr/bin/cloudlinux-selector', '/usr/sbin/cloudlinux-selector'].find((p) => fs.existsSync(p)) ?? null;
+}
+
+/**
+ * Commande d'installation des dépendances.
+ * - CloudLinux (o2switch) : `cloudlinux-selector install-modules` (le « Run NPM Install » du panneau). Un `npm install`
+ *   ordinaire remplacerait le lien node_modules de l'environnement par un vrai dossier, refusé ensuite par le panneau.
+ * - Ailleurs : npm de l'environnement Node de l'appli (même dossier que node), sinon celui du PATH.
+ */
+function installCommand({ appRoot, selector = findCloudLinuxSelector(), home = require('node:os').homedir() }) {
+  if (selector) {
+    const appRootFromHome = path.relative(home, appRoot).split(path.sep).join('/');
+    return { cmd: selector, args: ['install-modules', '--json', '--interpreter', 'nodejs', '--app-root', appRootFromHome] };
+  }
   const local = path.join(path.dirname(process.execPath), process.platform === 'win32' ? 'npm.cmd' : 'npm');
   return { cmd: fs.existsSync(local) ? local : 'npm', args: ['install', '--omit=dev', '--no-audit', '--no-fund'] };
 }
@@ -46,15 +61,14 @@ function defaultNpmCommand() {
  * @param {() => {cmd: string, args: string[]}} [options.npmCommand] commande lancée (tests)
  * @param {() => Promise<object>} [options.runMigrations] migrations puis seeds (migrate.js)
  * @param {boolean} [options.modulesLinkRequired] node_modules doit être le lien de l'environnement Node de CloudLinux
- *   (o2switch) : sinon npm créerait un vrai dossier, que le panneau refuse ensuite. Par défaut : Node lancé depuis un
- *   environnement « nodevenv ».
+ *   (o2switch), créé une première fois par « Run NPM Install ». Par défaut : CloudLinux présent.
  */
 function createDeployRouter({
   appRoot,
   secret,
-  npmCommand = defaultNpmCommand,
+  npmCommand = () => installCommand({ appRoot }),
   runMigrations,
-  modulesLinkRequired = process.execPath.split(/[\\/]/).includes('nodevenv'),
+  modulesLinkRequired = findCloudLinuxSelector() !== null,
 }) {
   const router = express.Router();
   const tmp = path.join(appRoot, 'tmp');
@@ -156,4 +170,4 @@ function createDeployRouter({
   return router;
 }
 
-module.exports = { createDeployRouter, secretMatches };
+module.exports = { createDeployRouter, secretMatches, installCommand };
