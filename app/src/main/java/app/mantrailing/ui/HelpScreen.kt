@@ -86,6 +86,13 @@ val HELP_SECTIONS = listOf(
         ),
     ),
     HelpSection(
+        "log", "Carnet d'entraînement",
+        listOf(
+            "En fin de pose, puis en fin de recherche, le carnet est proposé (tout est facultatif, « Plus tard » pour le passer) : traceur, objet odorant, lieu, terrain, difficultés, récompense, note du travail de l'équipe et commentaire.",
+            "La recherche reprend ce que le traceur a noté sur sa piste. Le carnet se complète ensuite avec « Carnet » sur une piste ou une recherche ouverte ; il apparaît dans « Mes pistes » (avec un filtre par terrain) et dans le rapport PDF.",
+        ),
+    ),
+    HelpSection(
         "export", "Exporter",
         listOf(
             "Sur une piste ou une recherche ouverte, « Exporter » propose un rapport PDF (carte, chiffres, météo, notes) ou un fichier GPX, à envoyer, imprimer ou enregistrer (Drive, e-mail…).",

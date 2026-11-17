@@ -105,4 +105,22 @@ class ReportTest {
         val report = sessionReport(session.copy(dogName = "Léo / Éclair"), "Perso", paris)
         assertEquals("Mantrailing_recherche_Leo-Eclair_2026-11-17_10h00.pdf", report.fileName)
     }
+
+    @Test
+    fun `rubrique carnet - champs remplis seulement, absente sans carnet`() {
+        val log = app.mantrailing.session.TrainingLog(
+            runner = "Julie", scentArticle = "T-shirt", terrain = listOf(app.mantrailing.session.Terrain.FOREST),
+            difficulties = listOf(app.mantrailing.session.Difficulty.CROSSINGS), rating = 4,
+        )
+        val rows = rows(sessionReport(session.copy(log = log), "Perso", paris))
+        assertEquals("Julie", rows["Carnet / Traceur"])
+        assertEquals("T-shirt", rows["Carnet / Objet odorant"])
+        assertEquals("Forêt", rows["Carnet / Terrain"])
+        assertEquals("Croisements", rows["Carnet / Difficultés"])
+        assertEquals("★★★★☆ (4/5)", rows["Carnet / Travail de l'équipe"])
+        assertNull(rows["Carnet / Récompense"])
+        assertFalse(sessionReport(session, "Perso", paris).sections.any { it.title == "Carnet" })
+        val trail = LaidTrail("p1", start - 1_800, start - 1_200, trail, log = log.forSearch())
+        assertEquals("Julie", rows(trailReport(trail, "Perso", paris))["Carnet / Traceur"])
+    }
 }

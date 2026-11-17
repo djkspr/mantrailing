@@ -4,6 +4,8 @@ import app.mantrailing.session.LaidTrail
 import app.mantrailing.session.NoteCategory
 import app.mantrailing.session.SearchNote
 import app.mantrailing.session.TrailSession
+import app.mantrailing.session.TrainingLog
+import app.mantrailing.session.stars
 import app.mantrailing.track.TrackStats
 import app.mantrailing.track.TrailDeviation
 import app.mantrailing.track.pathLengthMeters
@@ -56,6 +58,22 @@ private fun fileName(kind: String, who: String?, start: Long, zone: ZoneId): Str
     val clean = who?.let { java.text.Normalizer.normalize(it, java.text.Normalizer.Form.NFD) }
         ?.replace(Regex("\\p{M}"), "")?.replace(Regex("[^A-Za-z0-9-]+"), "-")?.trim('-')?.takeIf { it.isNotEmpty() }
     return listOfNotNull("Mantrailing", kind, clean, at(start, zone).format(FILE_DAY)).joinToString("_") + ".pdf"
+}
+
+/** Rubrique « Carnet » : champs remplis du carnet d'entraînement (null si vide). */
+internal fun logSection(log: TrainingLog?): ReportSection? {
+    val l = log ?: return null
+    val rows = listOfNotNull(
+        l.runner?.let { ReportRow("Traceur", it) },
+        l.scentArticle?.let { ReportRow("Objet odorant", it) },
+        l.place?.let { ReportRow("Lieu", it) },
+        l.terrain.takeIf { it.isNotEmpty() }?.let { t -> ReportRow("Terrain", t.joinToString { it.label }) },
+        l.difficulties.takeIf { it.isNotEmpty() }?.let { d -> ReportRow("Difficultés", d.joinToString { it.label }) },
+        l.reward?.let { ReportRow("Récompense", it) },
+        l.rating?.let { ReportRow("Travail de l'équipe", "${stars(it)} ($it/5)") },
+        l.comment?.let { ReportRow("Commentaire", it) },
+    )
+    return ReportSection("Carnet", rows).takeIf { rows.isNotEmpty() }
 }
 
 private fun weatherRows(label: String, weather: Weather?, zone: ZoneId): List<ReportRow> =
@@ -125,6 +143,7 @@ fun sessionReport(session: TrailSession, spaceName: String, zone: ZoneId = ZoneI
             ReportSection("Trace du chien", track).takeIf { track.isNotEmpty() },
             comparison?.let { ReportSection("Comparaison avec la piste", it) },
             ReportSection("Météo", weather).takeIf { weather.isNotEmpty() },
+            logSection(session.log),
         ),
         notes = reportNotes(session.notes, session.startedAt, zone),
         // Signalements faits pendant la pose, dont le début n'est pas gardé avec la recherche : heure seule.
@@ -149,6 +168,7 @@ fun trailReport(trail: LaidTrail, spaceName: String, zone: ZoneId = ZoneId.syste
         sections = listOfNotNull(
             ReportSection("Pose", general),
             ReportSection("Météo", weather).takeIf { weather.isNotEmpty() },
+            logSection(trail.log),
         ),
         notes = emptyList(),
         trailerNotes = reportNotes(trail.notes, trail.startedAt, zone),

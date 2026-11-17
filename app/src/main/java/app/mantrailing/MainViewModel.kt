@@ -58,6 +58,7 @@ import app.mantrailing.gpx.GpxWaypoint
 import app.mantrailing.gpx.writeGpx
 import app.mantrailing.ui.sourceLabel
 import app.mantrailing.session.mergeWeenectTrackers
+import app.mantrailing.session.TrainingLog
 import app.mantrailing.session.weenectIgnoreKey
 import app.mantrailing.tractive.TractiveAuthException
 import kotlinx.coroutines.CancellationException
@@ -111,6 +112,8 @@ data class UiState(
     val showTour: Boolean = false,
     /** Fichier GPX lu, en attente : piste posée ou trace d'un chien ? */
     val gpxImport: GpxTrack? = null,
+    /** Carnet d'entraînement ouvert (proposé en fin de pose ou de recherche, ou demandé ensuite). */
+    val logEditor: LogTarget? = null,
     /** Chiens de l'équipe. */
     val dogs: List<Dog> = emptyList(),
     /** Chien sélectionné : c'est lui qui cherche. */
@@ -179,6 +182,9 @@ data class UiState(
     /** Traceur Weenect de [dogId], si le compte Weenect est connecté. */
     fun weenectTrackerOf(dogId: String?): String? = weenect?.let { dogs.find { it.id == dogId }?.weenectTrackerId }
 }
+
+/** Piste posée ([trail] vrai) ou recherche dont on remplit le carnet d'entraînement. */
+data class LogTarget(val trail: Boolean, val id: String)
 
 /** Code d'invitation créé pour une équipe, à transmettre. */
 data class Invite(val teamName: String, val code: String)
@@ -878,6 +884,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         showTrail(trail)
         fetchTrailWeather(trail)
+        _state.update { it.copy(logEditor = LogTarget(trail = true, id = trail.id)) }
     }
 
     private suspend fun finishSearch(recording: ActiveRecording, outcome: NoteType?) {
@@ -906,7 +913,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             recording.id, recording.dogName, recording.source, recording.startedAt, endedAt, segments,
             trailId = trail?.id, trail = trail?.points.orEmpty(), trailEndedAt = trail?.endedAt,
             notes = locateNotes(notes, segments.flatten()), dogId = recording.dogId, updatedAt = System.currentTimeMillis(), spaceId = recording.spaceId,
-            trailNotes = trail?.notes.orEmpty(), trailWeather = trail?.weather,
+            trailNotes = trail?.notes.orEmpty(), trailWeather = trail?.weather, log = trail?.log?.forSearch(),
         )
         withContext(Dispatchers.IO) {
             repository.save(session)
@@ -924,6 +931,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         showSession(session)
         fetchSessionWeather(session)
+        _state.update { it.copy(logEditor = LogTarget(trail = false, id = session.id)) }
     }
 
     /** Positions du collier de [dogId] pendant la recherche (avec une marge d'une minute). Vide en cas d'échec réseau. */
@@ -1078,6 +1086,52 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun closeSession() = _state.update { it.clearedDisplay() }
 
+    // ---------- Carnet d'entraînement ----------
+
+    /** Carnet de la piste ou de la recherche affichée. */
+    fun openLogEditor() {
+        val s = _state.value
+        val target = s.openedSession?.let { LogTarget(false, it.id) } ?: s.openedTrail?.let { LogTarget(true, it.id) } ?: return
+        _state.update { it.copy(logEditor = target) }
+    }
+
+    fun closeLogEditor() = _state.update { it.copy(logEditor = null) }
+
+    /** Enregistre le carnet (vide : retiré) et le synchronise avec la piste ou la recherche. */
+    fun saveLog(log: TrainingLog) {
+        val target = _state.value.logEditor ?: return
+        val clean = log.cleaned()
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            if (target.trail) {
+                val current = _state.value.trails.find { it.id == target.id }
+                    ?: withContext(Dispatchers.IO) { trailRepository.load(target.id) } ?: return@launch
+                val updated = current.copy(log = clean, updatedAt = now)
+                withContext(Dispatchers.IO) { trailRepository.save(updated) }
+                _state.update { s ->
+                    s.copy(
+                        logEditor = null,
+                        trails = s.trails.map { if (it.id == updated.id) updated else it },
+                        openedTrail = s.openedTrail?.let { if (it.id == updated.id) it.copy(log = clean, updatedAt = now) else it },
+                    )
+                }
+            } else {
+                val current = _state.value.sessions.find { it.id == target.id }
+                    ?: withContext(Dispatchers.IO) { repository.load(target.id) } ?: return@launch
+                val updated = current.copy(log = clean, updatedAt = now)
+                withContext(Dispatchers.IO) { repository.save(updated) }
+                _state.update { s ->
+                    s.copy(
+                        logEditor = null,
+                        sessions = s.sessions.map { if (it.id == updated.id) updated else it },
+                        openedSession = s.openedSession?.let { if (it.id == updated.id) it.copy(log = clean, updatedAt = now) else it },
+                    )
+                }
+            }
+            syncChanges()
+        }
+    }
+
     // ---------- Import d'un fichier GPX (Garmin, autre appareil ou appli) ----------
 
     /** Lit le fichier choisi ; on demande ensuite si c'est une piste posée ou la trace d'un chien. */
@@ -1123,7 +1177,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             UUID.randomUUID().toString(), dog?.name ?: s.dogName, TrackSource.GPX, track.startedAt!!, track.endedAt!!, track.segments,
             trailId = trail?.id, trail = trail?.points.orEmpty(), trailEndedAt = trail?.endedAt,
             dogId = dog?.id, updatedAt = System.currentTimeMillis(), spaceId = trail?.spaceId ?: dog?.spaceId,
-            trailNotes = trail?.notes.orEmpty(), trailWeather = trail?.weather,
+            trailNotes = trail?.notes.orEmpty(), trailWeather = trail?.weather, log = trail?.log?.forSearch(),
         )
         withContext(Dispatchers.IO) { repository.save(session) }
         syncChanges()
@@ -1178,7 +1232,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             session != null -> Triple(
                 "Recherche de ${session.dogName}",
                 listOf(
-                    GpxOutTrack("Trace de ${session.dogName}", session.segments, sourceLabel(session.source)),
+                    GpxOutTrack("Trace de ${session.dogName}", session.segments, listOfNotNull(sourceLabel(session.source), session.log?.summary?.takeIf { it.isNotEmpty() }).joinToString(" · ")),
                     GpxOutTrack("Piste du traceur", listOf(session.trail)),
                 ),
                 session.trailNotes + session.notes,
