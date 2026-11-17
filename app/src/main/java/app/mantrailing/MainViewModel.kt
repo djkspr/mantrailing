@@ -132,7 +132,7 @@ data class Invite(val teamName: String, val code: String)
 
 /** Sauvegarde en ligne et équipes, vues par l'écran des paramètres. */
 data class CloudState(
-    /** Projet Firebase configuré dans cette version de l'appli. */
+    /** Serveur de sauvegarde configuré dans cette version de l'appli. */
     val available: Boolean = false,
     /** Compte Google connecté (null : sauvegarde désactivée). */
     val email: String? = null,

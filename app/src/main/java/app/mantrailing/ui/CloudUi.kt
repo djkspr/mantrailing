@@ -66,7 +66,7 @@ fun CloudSetting(cloud: CloudState, now: Long, actions: CloudActions) {
             return@Column
         }
         Text(
-            "Pistes, recherches et chiens sont copiés sur un serveur (Google Firebase, en Europe) : le téléphone " +
+            "Pistes, recherches et chiens sont copiés sur le serveur de Mantrailing (hébergé en France) : le téléphone " +
                 "ne garde en entier que les plus récents, rien n'est perdu en changeant de téléphone, et vous pouvez " +
                 "partager avec une équipe ce que vous choisissez.",
             style = MaterialTheme.typography.bodySmall,

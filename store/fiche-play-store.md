@@ -63,6 +63,29 @@ Type « Localisation » (FOREGROUND_SERVICE_LOCATION) :
   qui dure de quelques minutes à une heure. Une notification reste affichée pendant tout l'enregistrement. »
 - Vidéo : démarrer une piste, montrer la notification, écran éteint, terminer la piste (lien YouTube non répertorié).
 
+## Sécurité des données — avec la sauvegarde en ligne (Play Console > Contenu de l'application)
+
+À mettre à jour **le jour où la version avec la sauvegarde en ligne est publiée** (avant : rien ne quitte le
+téléphone, sauf vers Tractive). Politique de confidentialité correspondante : branche `sauvegarde-en-ligne` du
+dépôt mantrailing-site, à fusionner dans `main` au même moment.
+
+- L'appli collecte ou partage des données : **Oui**. Chiffrées en transit : **Oui** (HTTPS).
+- Les utilisateurs peuvent demander la suppression : **Oui**. Lien de suppression du compte :
+  `https://djkspr.github.io/mantrailing-site/politique-confidentialite.html#suppression-compte`
+- Création de compte : **Oui** (connexion Google) — suppression dans l'appli : Paramètres › Sauvegarde en ligne ›
+  Supprimer mes données en ligne.
+
+| Type de données | Collectée | Partagée | Facultative | Finalité |
+|---|---|---|---|---|
+| Position exacte | Oui | Non¹ | Oui (sauvegarde désactivable) | Fonctionnalités de l'appli |
+| Nom | Oui | Non¹ | Oui | Gestion du compte, fonctionnalités (nom montré aux membres d'une équipe) |
+| Adresse e-mail | Oui | Non | Oui | Gestion du compte |
+| ID utilisateur | Oui | Non | Oui | Gestion du compte |
+| Autres contenus générés par l'utilisateur (notes, noms des chiens) | Oui | Non¹ | Oui | Fonctionnalités de l'appli |
+
+¹ Visible des membres d'une équipe que l'utilisateur rejoint lui-même : Google ne compte pas comme « partage » un
+transfert initié par l'utilisateur vers d'autres utilisateurs qu'il choisit, ni l'hébergeur (prestataire).
+
 ## Visuels
 
 - Icône 512 × 512 : `icon-512.png`

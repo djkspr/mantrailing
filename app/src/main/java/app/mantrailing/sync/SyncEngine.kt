@@ -29,7 +29,7 @@ fun keyOf(kind: SyncKind, id: String) = "${kind.name}_$id"
 /** Éléments reçus du serveur depuis [SyncState.cursor], et le nouveau curseur. */
 data class PullResult(val items: List<SyncItem>, val cursor: String?)
 
-/** Le serveur : Firebase aujourd'hui, une autre base (MySQL…) demain. */
+/** Le serveur : l'API Mantrailing (o2switch), ou un faux serveur dans les tests. */
 interface SyncBackend {
     suspend fun push(items: List<SyncItem>)
 
