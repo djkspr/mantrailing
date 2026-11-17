@@ -86,6 +86,13 @@ val HELP_SECTIONS = listOf(
         ),
     ),
     HelpSection(
+        "progress", "Progrès du chien",
+        listOf(
+            "« Progrès », en haut de « Mes pistes » (ou dans le menu ⋮ d'un chien, dans les paramètres), montre ses recherches au fil du temps : nombre, part de « Trouvé », âge de piste et écart moyens, avec une flèche verte quand il progresse.",
+            "Courbes de l'âge de la piste, de l'écart moyen (plus bas, c'est mieux) et de la longueur de la piste, recherches par mois, et ses records : piste la plus vieille et la plus longue trouvées. Période au choix : 3 mois, 12 mois ou tout.",
+        ),
+    ),
+    HelpSection(
         "export", "Exporter",
         listOf(
             "Sur une piste ou une recherche ouverte, « Exporter » propose un rapport PDF (carte, chiffres, météo, notes) ou un fichier GPX, à envoyer, imprimer ou enregistrer (Drive, e-mail…).",

@@ -66,6 +66,8 @@ data class SettingsActions(
     val onSelectDog: (Dog) -> Unit = {},
     /** Partage un chien avec une équipe, ou le reprend en perso. */
     val onMoveDog: (Dog, String?) -> Unit = { _, _ -> },
+    /** Progrès d'un chien. */
+    val onDogProgress: (Dog) -> Unit = {},
     val onLogout: () -> Unit = {},
     val onWeenectLogin: (String, String) -> Unit = { _, _ -> },
     val onWeenectLogout: () -> Unit = {},
@@ -161,7 +163,7 @@ private fun SettingsPageContent(page: SettingsPage?, state: UiState, actions: Se
             null -> SettingsMenu(state, now, actions.onOpenHelp) { onOpen(it) }
             SettingsPage.DOGS -> DogsSetting(
                 state.dogs, state.activeDogId, actions.onSelectDog, actions.onAddDog, actions.onRenameDog, actions.onDeleteDog,
-                teams = state.cloud.teams, onMove = actions.onMoveDog,
+                teams = state.cloud.teams, onMove = actions.onMoveDog, onProgress = actions.onDogProgress,
             )
             SettingsPage.COLLARS -> CollarsSetting(state, actions)
             SettingsPage.BACKUP -> CloudSetting(state.cloud, now, actions.cloud)
