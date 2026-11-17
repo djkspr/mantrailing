@@ -1,5 +1,7 @@
 package app.mantrailing.ui
 
+import kotlin.math.cos
+import kotlin.math.pow
 import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.Toast
@@ -101,6 +103,8 @@ fun TrackMap(
     onNoteClick: (SearchNote) -> Unit = {},
     /** Pose en cours : la carte suit la dernière position, tant qu'on ne la déplace pas à la main. */
     follow: Boolean = false,
+    /** Mode formateur : couloir de cette largeur (mètres de part et d'autre) dessiné autour de la piste. */
+    corridorMeters: Int? = null,
 ) {
     val currentNotes by rememberUpdatedState(notes)
     val currentOnNoteClick by rememberUpdatedState(onNoteClick)
@@ -146,6 +150,16 @@ fun TrackMap(
                 // Piste du traceur, sous la trace du chien : bleu pointillé, départ vert, arrivée rouge.
                 style.addSource(GeoJsonSource(TRAIL_SOURCE))
                 style.addSource(GeoJsonSource(TRAIL_ENDS_SOURCE))
+                // Couloir du mode formateur : large bande translucide, invisible hors mode formateur.
+                style.addLayer(
+                    LineLayer(CORRIDOR_LAYER, TRAIL_SOURCE).withProperties(
+                        PropertyFactory.lineColor(TRAIL_COLOR),
+                        PropertyFactory.lineOpacity(0.18f),
+                        PropertyFactory.lineWidth(0f),
+                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                    ),
+                )
                 style.addLayer(
                     LineLayer("trail-casing", TRAIL_SOURCE).withProperties(
                         PropertyFactory.lineColor("#FFFFFF"),
@@ -255,6 +269,15 @@ fun TrackMap(
         }
     }
 
+    LaunchedEffect(map, corridorMeters, trail.firstOrNull()) {
+        val (_, style) = map ?: return@LaunchedEffect
+        val lat = trail.firstOrNull()?.lat
+        style.getLayer(CORRIDOR_LAYER)?.setProperties(
+            if (corridorMeters == null || lat == null) PropertyFactory.lineWidth(0f)
+            else PropertyFactory.lineWidth(corridorWidthExpression(corridorMeters, lat)),
+        )
+    }
+
     LaunchedEffect(map, notes) {
         val (_, style) = map ?: return@LaunchedEffect
         style.getSourceAs<GeoJsonSource>(NOTES_SOURCE)?.setGeoJson(noteFeatures(notes))
@@ -267,7 +290,9 @@ fun TrackMap(
         style.getSourceAs<GeoJsonSource>(TRAIL_ENDS_SOURCE)?.setGeoJson(trailEnds(trail))
         val points = (segments.flatten() + trail).map { LatLng(it.lat, it.lon) }
         if (follow) {
-            val last = points.lastOrNull() ?: return@LaunchedEffect
+            // Position suivie : la dernière de la trace en cours (mode formateur), sinon celle du parcours posé.
+            val live = segments.lastOrNull { it.isNotEmpty() }?.last() ?: trail.lastOrNull()
+            val last = live?.let { LatLng(it.lat, it.lon) } ?: return@LaunchedEffect
             if (!following) return@LaunchedEffect
             // Zoom de marche la première fois ; ensuite on garde celui choisi.
             val zoom = if (followZoomed) m.cameraPosition.zoom else 17.0
@@ -352,6 +377,17 @@ private fun trailEnds(trail: List<Position>): FeatureCollection {
 }
 
 const val TRAIL_COLOR = "#1C6DD0"
+private const val CORRIDOR_LAYER = "trail-corridor"
+
+/**
+ * Épaisseur en pixels d'une bande de 2 × [meters] à la latitude [lat], à tout zoom : la carte double d'échelle
+ * à chaque niveau, d'où une interpolation exponentielle de base 2 entre deux niveaux extrêmes.
+ */
+private fun corridorWidthExpression(meters: Int, lat: Double): Expression {
+    val metersPerPixelZ0 = 78_271.517 * cos(Math.toRadians(lat))
+    fun widthAt(z: Int) = (2 * meters * 2.0.pow(z) / metersPerPixelZ0).toFloat()
+    return Expression.interpolate(Expression.exponential(2f), Expression.zoom(), Expression.stop(0, widthAt(0)), Expression.stop(22, widthAt(22)))
+}
 private const val TRAIL_START_COLOR = "#2B8A3E"
 private const val TRAIL_END_COLOR = "#C92A2A"
 private fun noteFeatures(notes: List<SearchNote>): FeatureCollection =

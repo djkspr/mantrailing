@@ -34,7 +34,11 @@ data class ActiveRecording(
     val dogId: String? = null,
     /** Équipe qui verra la piste ou la recherche (null : espace perso). */
     val spaceId: String? = null,
-)
+    /** Mode formateur : largeur du couloir surveillé autour de la piste suivie (null : recherche normale, piste masquée). */
+    val corridorMeters: Int? = null,
+) {
+    val instructor: Boolean get() = corridorMeters != null
+}
 
 /** Piste posée par le traceur : le parcours que le chien devra suivre. Horodatages en secondes Unix. */
 @Serializable
@@ -95,6 +99,10 @@ data class TrailSession(
     val weather: Weather? = null,
     /** Météo pendant la pose de la piste suivie, pour comparer. */
     val trailWeather: Weather? = null,
+    /** Mode formateur : largeur du couloir (null : recherche normale). */
+    val corridorMeters: Int? = null,
+    /** Mode formateur : nombre de sorties du couloir pendant la recherche. */
+    val corridorExits: Int? = null,
 ) {
     /** Âge de la piste au départ du chien, en secondes. */
     val trailAgeSeconds: Long? get() = trailEndedAt?.let { (startedAt - it).coerceAtLeast(0) }

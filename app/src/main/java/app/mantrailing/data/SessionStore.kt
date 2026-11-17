@@ -17,6 +17,7 @@ import app.mantrailing.session.Dog
 import app.mantrailing.session.NoteType
 import app.mantrailing.session.RecordingKind
 import app.mantrailing.session.TrackSource
+import app.mantrailing.track.DEFAULT_CORRIDOR_METERS
 import app.mantrailing.session.formatDogs
 import app.mantrailing.session.tractiveDogId
 import app.mantrailing.session.formatQuickNotes
@@ -154,7 +155,17 @@ class SessionStore(private val context: Context) {
         val id = p[REC_ID] ?: return@map null
         val source = p[REC_SOURCE]?.let { runCatching { TrackSource.valueOf(it) }.getOrNull() } ?: return@map null
         val kind = p[REC_KIND]?.let { runCatching { RecordingKind.valueOf(it) }.getOrNull() } ?: RecordingKind.SEARCH
-        ActiveRecording(id, p[REC_DOG] ?: "", source, p[REC_STARTED] ?: 0, kind, p[REC_TRAIL], p[REC_DOG_ID], p[REC_SPACE])
+        ActiveRecording(
+            id, p[REC_DOG] ?: "", source, p[REC_STARTED] ?: 0, kind, p[REC_TRAIL], p[REC_DOG_ID], p[REC_SPACE],
+            corridorMeters = p[REC_CORRIDOR]?.toIntOrNull(),
+        )
+    }
+
+    /** Dernière largeur de couloir choisie en mode formateur. */
+    val corridorMeters: Flow<Int> = context.dataStore.data.map { p -> p[CORRIDOR]?.toIntOrNull() ?: DEFAULT_CORRIDOR_METERS }
+
+    suspend fun saveCorridorMeters(meters: Int) {
+        context.dataStore.edit { it[CORRIDOR] = meters.toString() }
     }
 
     suspend fun saveSession(session: Session) {
@@ -176,7 +187,7 @@ class SessionStore(private val context: Context) {
     suspend fun saveActiveRecording(recording: ActiveRecording?) {
         context.dataStore.edit {
             if (recording == null) {
-                listOf(REC_ID, REC_DOG, REC_SOURCE, REC_KIND, REC_TRAIL, REC_DOG_ID, REC_SPACE).forEach(it::remove)
+                listOf(REC_ID, REC_DOG, REC_SOURCE, REC_KIND, REC_TRAIL, REC_DOG_ID, REC_SPACE, REC_CORRIDOR).forEach(it::remove)
                 it.remove(REC_STARTED)
             } else {
                 it[REC_ID] = recording.id
@@ -187,6 +198,7 @@ class SessionStore(private val context: Context) {
                 if (recording.trailId != null) it[REC_TRAIL] = recording.trailId else it.remove(REC_TRAIL)
                 if (recording.dogId != null) it[REC_DOG_ID] = recording.dogId else it.remove(REC_DOG_ID)
                 if (recording.spaceId != null) it[REC_SPACE] = recording.spaceId else it.remove(REC_SPACE)
+                if (recording.corridorMeters != null) it[REC_CORRIDOR] = recording.corridorMeters.toString() else it.remove(REC_CORRIDOR)
             }
         }
     }
@@ -216,6 +228,8 @@ class SessionStore(private val context: Context) {
         val REC_ID = stringPreferencesKey("recording_id")
         val REC_DOG = stringPreferencesKey("recording_dog")
         val REC_DOG_ID = stringPreferencesKey("recording_dog_id")
+        val REC_CORRIDOR = stringPreferencesKey("recording_corridor_m")
+        val CORRIDOR = stringPreferencesKey("corridor_m")
         val REC_SPACE = stringPreferencesKey("recording_space_id")
         val REC_SOURCE = stringPreferencesKey("recording_source")
         val REC_STARTED = longPreferencesKey("recording_started_at")

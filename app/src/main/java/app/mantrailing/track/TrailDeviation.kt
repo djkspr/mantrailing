@@ -54,7 +54,7 @@ data class TrailDeviation(
 }
 
 /** Projection plane locale (équirectangulaire), précise à quelques centimètres sur l'étendue d'une piste. */
-private class LocalProjection(origin: Position) {
+internal class LocalProjection(origin: Position) {
     private val lat0 = origin.lat
     private val lon0 = origin.lon
     private val mPerDegLat = Math.toRadians(1.0) * 6_371_000.0

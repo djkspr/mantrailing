@@ -120,6 +120,8 @@ private fun App(
     var pendingLayTrail by remember { mutableStateOf(false) }
     var rememberPendingChoice by remember { mutableStateOf(false) }
     var pendingTrailId by remember { mutableStateOf<String?>(null) }
+    // Mode formateur demandé pour la recherche à démarrer : largeur du couloir (null : recherche normale).
+    var pendingCorridor by remember { mutableStateOf<Int?>(null) }
     // Espace (perso ou équipe) de la piste ou recherche à démarrer.
     var pendingSpaceId by remember { mutableStateOf<String?>(null) }
     // Choix de l'espace demandé : pour poser une piste (true) ou pour une recherche (false).
@@ -139,7 +141,7 @@ private fun App(
             result[Manifest.permission.ACCESS_FINE_LOCATION] != true ->
                 vm.showMessage("Sans l'autorisation de localisation précise, le téléphone ne peut rien enregistrer.")
             pendingLayTrail -> vm.startTrailLaying(pendingSpaceId)
-            else -> vm.startRecording(TrackSource.PHONE, rememberPendingChoice, pendingTrailId, pendingSpaceId)
+            else -> vm.startRecording(TrackSource.PHONE, rememberPendingChoice, pendingTrailId, pendingSpaceId, pendingCorridor)
         }
     }
 
@@ -179,13 +181,18 @@ private fun App(
             rememberPendingChoice = remember
             requestLocation()
         } else {
-            vm.startRecording(source, remember, pendingTrailId, pendingSpaceId)
+            vm.startRecording(source, remember, pendingTrailId, pendingSpaceId, pendingCorridor)
         }
     }
 
     /** Recherche dans l'espace [spaceId] : source de la trace, proposée si besoin, puis départ. */
     fun searchIn(spaceId: String?) {
         pendingSpaceId = spaceId
+        // Mode formateur : l'équipe est située par le GPS de ce téléphone, sans choix de source.
+        if (pendingCorridor != null) {
+            startWith(TrackSource.PHONE, remember = false)
+            return
+        }
         when (val decision = decideSource(state.trackSource, state.collarReady)) {
             StartDecision.AskSource -> askSource = true
             is StartDecision.Start -> startWith(decision.source, remember = false)
@@ -196,8 +203,9 @@ private fun App(
      * Recherche sur [trailId] (ou sans piste). Avec des équipes, on demande pour qui : par défaut l'équipe
      * de la piste suivie, sinon celle de la dernière fois.
      */
-    fun beginSearch(trailId: String?) {
+    fun beginSearch(trailId: String?, corridorMeters: Int? = null) {
         pendingTrailId = trailId
+        pendingCorridor = corridorMeters.takeIf { trailId != null }
         if (state.cloud.teams.isEmpty()) {
             searchIn(null)
         } else {
@@ -314,6 +322,8 @@ private fun App(
             now = now,
             onChoose = { trail -> askTrail = false; beginSearch(trail?.id) },
             onDismiss = { askTrail = false },
+            onChooseInstructor = { trail, corridor -> askTrail = false; beginSearch(trail.id, corridor) },
+            corridorDefault = state.corridorMeters,
         )
     }
 
