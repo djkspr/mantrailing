@@ -45,8 +45,17 @@ function defaultNpmCommand() {
  * @param {string|undefined} options.secret secret attendu ; absent : routes désactivées
  * @param {() => {cmd: string, args: string[]}} [options.npmCommand] commande lancée (tests)
  * @param {() => Promise<object>} [options.runMigrations] migrations puis seeds (migrate.js)
+ * @param {boolean} [options.modulesLinkRequired] node_modules doit être le lien de l'environnement Node de CloudLinux
+ *   (o2switch) : sinon npm créerait un vrai dossier, que le panneau refuse ensuite. Par défaut : Node lancé depuis un
+ *   environnement « nodevenv ».
  */
-function createDeployRouter({ appRoot, secret, npmCommand = defaultNpmCommand, runMigrations }) {
+function createDeployRouter({
+  appRoot,
+  secret,
+  npmCommand = defaultNpmCommand,
+  runMigrations,
+  modulesLinkRequired = process.execPath.split(/[\\/]/).includes('nodevenv'),
+}) {
   const router = express.Router();
   const tmp = path.join(appRoot, 'tmp');
   const statusFile = path.join(tmp, 'npm-install.json');
@@ -69,6 +78,17 @@ function createDeployRouter({ appRoot, secret, npmCommand = defaultNpmCommand, r
     const current = readJson(statusFile);
     if (current?.state === 'running' && Date.now() - new Date(current.startedAt).getTime() < TIMEOUT_MS) {
       return res.status(202).json({ status: 'running', startedAt: current.startedAt });
+    }
+    // CloudLinux : les modules vivent dans l'environnement de l'appli, derrière le lien node_modules créé par
+    // « Run NPM Install ». Sans ce lien, npm créerait un vrai dossier dans l'appli, refusé ensuite par le panneau.
+    if (modulesLinkRequired) {
+      const link = fs.lstatSync(path.join(appRoot, 'node_modules'), { throwIfNoEntry: false });
+      if (!link?.isSymbolicLink()) {
+        return res.status(409).json({
+          error: "node_modules n'est pas le lien de l'environnement Node : clique « Run NPM Install » dans cPanel.",
+          needsPanelInstall: true,
+        });
+      }
     }
     const hash = lockHash();
     const installed = fs.existsSync(installedHash) ? fs.readFileSync(installedHash, 'utf8').trim() : null;

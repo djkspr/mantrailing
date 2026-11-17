@@ -88,6 +88,54 @@ test('installation en échec : état « failed » avec le code de sortie, à ref
   exitCode = 0;
 });
 
+test('o2switch (CloudLinux) : jamais de vrai dossier node_modules, « Run NPM Install » demandé', async () => {
+  const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mantrailing-cloudlinux-'));
+  fs.writeFileSync(path.join(appRoot, 'package-lock.json'), '{}');
+  let ran = false;
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/deploy',
+    createDeployRouter({
+      appRoot,
+      secret: 's',
+      modulesLinkRequired: true,
+      npmCommand: () => {
+        ran = true;
+        return { cmd: process.execPath, args: ['-e', ''] };
+      },
+    })
+  );
+  const other = await new Promise((resolve) => {
+    const s = app.listen(0, () => resolve(s));
+  });
+  const post = () =>
+    fetch(`http://127.0.0.1:${other.address().port}/deploy/npm-install`, {
+      method: 'POST',
+      headers: { 'x-deploy-secret': 's', 'content-type': 'application/json' },
+      body: '{}',
+    });
+  try {
+    // Pas encore de lien (premier déploiement) : refus, rien n'est lancé.
+    let res = await post();
+    assert.equal(res.status, 409);
+    assert.equal((await res.json()).needsPanelInstall, true);
+    // Vrai dossier (ce que npm aurait créé) : refus aussi.
+    fs.mkdirSync(path.join(appRoot, 'node_modules'));
+    res = await post();
+    assert.equal(res.status, 409);
+    assert.equal(ran, false);
+    // Lien vers l'environnement (ce que crée le panneau) : installation.
+    fs.rmdirSync(path.join(appRoot, 'node_modules'));
+    const venv = fs.mkdtempSync(path.join(os.tmpdir(), 'mantrailing-venv-'));
+    fs.symlinkSync(venv, path.join(appRoot, 'node_modules'), 'junction');
+    res = await post();
+    assert.equal(res.status, 202);
+  } finally {
+    other.close();
+  }
+});
+
 test('sans secret configuré : routes absentes', async () => {
   const app = express();
   app.use('/deploy', createDeployRouter({ appRoot: root, secret: undefined }));

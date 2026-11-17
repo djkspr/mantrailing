@@ -226,6 +226,12 @@ function Update-ServerDependencies {
             Read-Host "Entrée une fois « Run NPM Install » terminé" | Out-Null
             return $true
         }
+        if ($code -eq 409) {
+            # o2switch : le lien node_modules de l'environnement Node n'existe pas encore (créé par le panneau).
+            Write-Host "⚠ L'environnement Node de l'appli n'est pas prêt : clique « Run NPM Install » dans $appPanel, puis réponds ici." -ForegroundColor Yellow
+            Read-Host "Entrée une fois « Run NPM Install » terminé" | Out-Null
+            return $true
+        }
         if ($code -eq 403) {
             Write-Host "✗ Installation refusée (HTTP 403) : MANTRAILING_DEPLOY_SECRET (ce poste) et DEPLOY_SECRET (serveur) diffèrent." -ForegroundColor Red
             return $false
