@@ -10,36 +10,43 @@ La trace GPS de votre chien comparée à la piste du traceur, sur carte IGN.
 
 ## Description complète (4000 caractères max)
 
-Mantrailing aide les maîtres-chiens à analyser les séances de pistage de personnes (mantrailing) : la trace du chien est superposée à la piste réellement posée par le traceur.
+Mantrailing aide les maîtres-chiens à analyser leurs séances de pistage de personnes : la trace du chien est superposée à la piste réellement posée par le traceur, sur carte IGN.
 
 1. LE TRACEUR POSE LA PISTE
-« Poser une piste » enregistre son parcours avec le GPS du téléphone, jusqu'à la cachette.
+« Poser une piste » enregistre son parcours au GPS du téléphone, même écran éteint ; le tracé et la distance s'affichent en direct. En chemin, il signale ce que le maître-chien doit savoir : danger, point d'attention, route, changement de sol.
 
 2. LE CHIEN TRAVAILLE
-Après le temps de vieillissement, « Démarrer une recherche » : choisissez la piste, l'application enregistre la trace du chien. La piste reste masquée pendant la recherche, pour ne pas influencer le maître-chien. D'un appui, notez ce qui se passe : hésitation, perte de piste, reprise, négatif, distraction… (plus de 20 notes, personnalisables).
+Après le vieillissement, « Démarrer une recherche » : la piste reste masquée pour ne pas influencer le maître-chien, seuls les signalements du traceur sont annoncés. D'un appui, notez hésitation, perte de piste, reprise, distraction… (plus de 20 notes, boutons personnalisables).
 
 3. LE BILAN
-À l'arrivée, la piste (bleu), la trace du chien (orange) et vos notes s'affichent sur la carte, avec l'âge de la piste, l'écart moyen et maximal du chien, la part de la piste couverte et si l'arrivée a été atteinte. Vous voyez où il a travaillé, où il a dépassé un virage, où il a coupé.
+La piste (bleu), la trace du chien (orange) et vos notes sur la carte, avec l'âge de la piste, l'écart moyen et maximal, la part de la piste couverte, l'arrivée atteinte ou non. La météo (vent, température, humidité) est ajoutée toute seule.
 
-DEUX FAÇONS D'ENREGISTRER LA TRACE DU CHIEN
-• Avec son collier GPS Tractive (compte Tractive) : le mode LIVE est activé automatiquement pendant la recherche
-• Avec le GPS du téléphone du maître-chien, à quelques mètres du chien au bout de la longe : une position par seconde, même écran éteint
+LA TRACE DU CHIEN
+• Collier GPS Tractive (mode LIVE) ou Weenect (super live), activé automatiquement pendant la recherche
+• GPS du téléphone du maître-chien, une position par seconde
+• Fichier GPX d'un GPS Garmin (Alpha…) ou d'une autre application
 
-FONCTIONNALITÉS
-• Mes pistes : pistes posées et recherches, enregistrées sur le téléphone, à revoir sur la carte
-• Plusieurs chiens : chacun ses recherches, avec ou sans collier ; les chiens du compte Tractive sont ajoutés d'office
-• Fonds de carte IGN (plan et photos aériennes) et OpenStreetMap
-• Distance, durée, fréquence et précision des positions
-• Trace du collier sur une période libre, pour une sortie qui n'a pas été enregistrée
-• Séance de démonstration pour découvrir l'application
+POUR PROGRESSER
+• Carnet d'entraînement : traceur, objet odorant, lieu, terrain, difficultés, récompense, note de l'équipe
+• Progrès de chaque chien : % de pistes trouvées, âge de piste, écart moyen, records, courbes sur 3 mois, 12 mois ou tout
+• Mode formateur : sur le téléphone du formateur, la piste reste visible avec un couloir de 10 à 50 m ; il vibre quand l'équipe en sort
+
+SUR LE TERRAIN
+• Cartes hors ligne : téléchargez le plan IGN du terrain avant de partir dans un bois sans réseau
+• Fonds IGN (plan, photos aériennes) et OpenStreetMap, bouton « Me localiser »
+• Plusieurs chiens, chacun ses recherches
+
+PARTAGER ET GARDER
+• Rapport PDF (carte, chiffres, météo, notes) et export GPX, à envoyer ou imprimer
+• Sauvegarde en ligne facultative, hébergée en France : rien n'est perdu en changeant de téléphone, et seules les séances récentes restent en entier sur le téléphone ; synchronisation possible en Wi-Fi seulement
+• Équipes (famille, club) : invitation par code ; une équipe ne voit que ce qui est fait en son nom, jamais le reste
+
+Aide intégrée, tour guidé au premier lancement et séance de démonstration pour découvrir l'application.
 
 VOS DONNÉES
-La position du téléphone n'est lue que pendant une pose de piste ou une recherche que vous avez démarrée, avec une notification affichée. Tout reste sur votre téléphone. Votre mot de passe Tractive n'est jamais enregistré : seul un jeton de connexion est conservé. Aucune donnée n'est envoyée au développeur. Pas de publicité, pas de suivi d'audience.
+La position du téléphone n'est lue que pendant une pose de piste ou une recherche que vous avez démarrée, avec une notification affichée. Sans la sauvegarde en ligne, tout reste sur votre téléphone. Vos mots de passe Tractive et Weenect ne sont jamais enregistrés : seul un jeton de connexion est conservé. Pas de publicité, pas de suivi d'audience.
 
-EN PRÉPARATION
-Partage d'une piste entre le téléphone du traceur et celui du maître-chien.
-
-Mantrailing est une application indépendante, ni affiliée à Tractive, ni approuvée par Tractive. Un abonnement Tractive actif est nécessaire pour utiliser le collier.
+Mantrailing est une application indépendante, affiliée ni à Tractive ni à Weenect, ni approuvée par eux. Un abonnement actif auprès du fabricant est nécessaire pour utiliser un collier.
 
 ## Accès à l'application (Play Console > Contenu de l'application)
 
@@ -51,7 +58,7 @@ Choisir « Tout ou partie des fonctionnalités sont limitées », puis ajouter d
 - Autres informations :
   > L'application récupère la trace GPS d'un collier Tractive (service tiers, collier physique et abonnement requis).
   > Pour l'examen, aucun compte Tractive n'est nécessaire : sur l'écran d'accueil, appuyez sur « Voir une séance de
-  > démonstration », ou saisissez les identifiants ci-dessus dans Menu (⋮) > Paramètres > Collier GPS Tractive.
+  > démonstration », ou saisissez les identifiants ci-dessus dans Menu (⋮) > Paramètres > Colliers GPS > Tractive.
   > Une séance fictive complète s'affiche alors (carte, trace, bilan), sans connexion à Tractive.
 
 ## Autorisations de service au premier plan (Play Console > Contenu de l'application)

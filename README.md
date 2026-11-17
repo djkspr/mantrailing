@@ -1,20 +1,25 @@
 # Mantrailing
 
 Application Android d'entraînement au mantrailing : enregistre la piste du traceur, récupère la trace du chien
-depuis son collier GPS Tractive et superpose les deux pour analyser le travail du chien.
+(collier Tractive ou Weenect, GPS du téléphone ou fichier GPX) et superpose les deux pour analyser son travail.
 
 ## Application Android (`app/`)
 
 Kotlin + Jetpack Compose, carte MapLibre (fonds IGN plan / photos aériennes, OSM via CARTO).
 
-État actuel (v0.1) :
-- connexion au compte Tractive (seul un jeton est conservé, jamais le mot de passe) ;
-- choix du chien ;
-- choix d'une période (date + heures) et affichage de la trace du collier, avec bilan :
-  distance, durée, intervalle entre points, précision, part de positions GPS ;
-- bouton « Activer LIVE » (une position toutes les 2-3 s, indispensable pour le mantrailing).
-
-À venir : enregistrement de la piste du traceur, superposition et écarts chien / piste, carnet d'entraînement.
+Fonctionnalités (détail pour l'utilisateur : écran « Aide » de l'appli, `ui/HelpScreen.kt`) :
+- **pose de la piste** au GPS du téléphone (service au premier plan, écran éteint), tracé et distance en direct,
+  signalements du traceur (danger, point d'attention…) ;
+- **recherche** sur une piste choisie, masquée pendant le travail ; trace du chien par collier **Tractive** (mode
+  LIVE) ou **Weenect** (super live) — API non officielles, seul un jeton est conservé — ou GPS du téléphone ;
+  notes rapides pendant la recherche ;
+- **bilan** : piste et trace superposées, écarts, piste couverte, arrivée, notes placées ; **météo** Open-Meteo ;
+- **carnet d'entraînement** (traceur, objet odorant, terrain, difficultés, note) et **progrès** de chaque chien ;
+- **mode formateur** : piste visible avec un couloir, alerte (vibration) quand l'équipe en sort ;
+- **cartes hors ligne** (zones IGN téléchargées avec l'OfflineManager de MapLibre) ;
+- **import GPX** (Garmin…), **export** rapport PDF et fichier GPX ;
+- plusieurs chiens, **sauvegarde en ligne** facultative et **équipes** (API `server/`, voir plus bas) ;
+- tour guidé au premier lancement, aide intégrée, séance de démonstration, mises à jour proposées à l'ouverture.
 
 ### Construire et tester
 
@@ -22,7 +27,7 @@ Ouvrir le dossier dans Android Studio, ou en ligne de commande (JDK d'Android St
 
 ```sh
 ./gradlew testDebugUnitTest          # tests unitaires (API Tractive simulée, statistiques, période)
-./gradlew connectedDebugAndroidTest  # tests d'interface sur émulateur ou téléphone branché
+./gradlew connectedDebugAndroidTest  # tests d'interface : sur l'ÉMULATEUR seulement (ils vident l'appli d'un téléphone)
 ./gradlew installDebug               # installer sur le téléphone
 ```
 
