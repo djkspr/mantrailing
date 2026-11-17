@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rapports PDF partagés depuis l'appli (dossier vidé à chaque export). -->
+<paths>
+    <cache-path name="reports" path="reports/" />
+</paths>

@@ -91,6 +91,8 @@ data class TrackActions(
     val onStopRecording: (NoteType?) -> Unit = {},
     val onOpenSessions: () -> Unit = {},
     val onCloseSession: () -> Unit = {},
+    /** Rapport PDF de la recherche ou de la piste affichée. */
+    val onExportPdf: () -> Unit = {},
     val onAddNote: (NoteType, String?) -> Unit = { _, _ -> },
     val onUndoNote: () -> Unit = {},
     val onUpdateNote: (SearchNote) -> Unit = {},
@@ -196,11 +198,13 @@ fun TrackScreen(
                         state.openedSession.weather?.let { append("\nMétéo au départ : ${it.summary}") }
                         state.openedSession.trailWeather?.let { append("\nPendant la pose : ${it.summary}") }
                     },
+                    pdfAction(state, actions),
                     "Fermer" to actions.onCloseSession,
                 )
                 state.openedTrail != null -> InfoBar(
                     "Piste posée le ${formatSessionDate(state.openedTrail.startedAt)}" +
                         (state.openedTrail.weather?.let { "\nMétéo pendant la pose : ${it.summary}" } ?: ""),
+                    pdfAction(state, actions),
                     "Lancer la recherche" to { actions.onStartSearchOnTrail(state.openedTrail) },
                     "Fermer" to actions.onCloseSession,
                 )
@@ -289,6 +293,10 @@ fun TrackScreen(
         )
     }
 }
+
+/** « PDF » : rapport complet à envoyer ou enregistrer ; « PDF… » pendant sa création. */
+private fun pdfAction(state: UiState, actions: TrackActions): Pair<String, () -> Unit> =
+    (if (state.exporting) "PDF…" else "PDF") to { if (!state.exporting) actions.onExportPdf() }
 
 @Composable
 private fun InfoBar(text: String, vararg actions: Pair<String, () -> Unit>) {
@@ -397,11 +405,11 @@ fun TrailChoiceDialog(trails: List<LaidTrail>, now: Long, onChoose: (LaidTrail?)
     )
 }
 
-/** Longueur de la piste ; gardée à part quand le parcours n'est plus qu'en ligne. */
 /** « 820 m », puis « 1,24 km ». */
 fun formatDistance(meters: Double): String =
     if (meters < 1_000) "%.0f m".format(Locale.FRENCH, meters) else "%.2f km".format(Locale.FRENCH, meters / 1000)
 
+/** Longueur de la piste ; gardée à part quand le parcours n'est plus qu'en ligne. */
 fun trailLength(trail: LaidTrail) = trail.lengthMeters ?: pathLengthMeters(trail.points)
 
 @Composable

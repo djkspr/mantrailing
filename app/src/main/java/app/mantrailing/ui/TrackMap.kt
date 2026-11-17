@@ -62,7 +62,8 @@ private fun ign(layer: String, format: String) =
     "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=$layer" +
         "&STYLE=normal&TILEMATRIXSET=PM&FORMAT=$format&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}"
 
-private val STYLE_JSON = """
+/** Style de carte (fonds IGN, OSM), aussi utilisé pour l'image des rapports PDF. */
+val MAP_STYLE_JSON = """
 {
   "version": 8,
   "center": [2.4, 46.6], "zoom": 5,
@@ -141,7 +142,7 @@ fun TrackMap(
             m.uiSettings.isRotateGesturesEnabled = false
             // Vue de la France tant qu'aucune trace n'est affichée (le centre du style n'est pas appliqué).
             m.cameraPosition = CameraPosition.Builder().target(LatLng(46.6, 2.4)).zoom(4.6).build()
-            m.setStyle(Style.Builder().fromJson(STYLE_JSON)) { style ->
+            m.setStyle(Style.Builder().fromJson(MAP_STYLE_JSON)) { style ->
                 // Piste du traceur, sous la trace du chien : bleu pointillé, départ vert, arrivée rouge.
                 style.addSource(GeoJsonSource(TRAIL_SOURCE))
                 style.addSource(GeoJsonSource(TRAIL_ENDS_SOURCE))

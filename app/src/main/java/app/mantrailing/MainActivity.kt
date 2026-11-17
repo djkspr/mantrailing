@@ -270,6 +270,7 @@ private fun App(
                 onStopRecording = vm::stopRecording,
                 onOpenSessions = { screen = Screen.SESSIONS },
                 onCloseSession = vm::closeSession,
+                onExportPdf = vm::exportPdf,
                 onAddNote = vm::addNote,
                 onUndoNote = vm::undoLastNote,
                 onUpdateNote = vm::updateNote,

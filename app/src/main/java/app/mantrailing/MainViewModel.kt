@@ -8,6 +8,14 @@ import android.content.Context
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import app.mantrailing.data.AppStorage
 import app.mantrailing.demo.DemoSession
+import app.mantrailing.export.ReportMap
+import app.mantrailing.export.caption
+import app.mantrailing.export.renderReportMap
+import app.mantrailing.export.reportsDir
+import app.mantrailing.export.sessionReport
+import app.mantrailing.export.shareReport
+import app.mantrailing.export.trailReport
+import app.mantrailing.export.writeReportPdf
 import app.mantrailing.session.stampChangedDogs
 import app.mantrailing.sync.CloudAccount
 import app.mantrailing.sync.CloudConfig
@@ -85,6 +93,8 @@ data class UiState(
     val activeDogId: String? = null,
     val range: TimeRange = TimeRange.lastHours(3),
     val busy: Boolean = false,
+    /** Rapport PDF en cours de création. */
+    val exporting: Boolean = false,
     val message: String? = null,
     val segments: List<List<Position>> = emptyList(),
     val stats: TrackStats? = null,
@@ -925,6 +935,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeSession() = _state.update { it.clearedDisplay() }
+
+    // ---------- Rapport PDF de la recherche ou de la piste affichée ----------
+
+    /** Crée le PDF (carte, chiffres, météo, notes) et propose de l'envoyer ou de l'enregistrer. */
+    fun exportPdf() {
+        val s = _state.value
+        if (s.exporting) return
+        val session = s.openedSession
+        val trail = s.openedTrail
+        val (report, map) = when {
+            session != null -> sessionReport(session, s.cloud.spaceName(session.spaceId)) to
+                ReportMap(session.segments, session.trail, session.trailNotes.sortedBy { it.time } + session.notes.sortedBy { it.time })
+            trail != null -> trailReport(trail, s.cloud.spaceName(trail.spaceId)) to
+                ReportMap(trail = trail.points, notes = trail.notes.sortedBy { it.time })
+            else -> return
+        }
+        _state.update { it.copy(exporting = true) }
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val file = runCatching {
+                val image = renderReportMap(app, map)
+                withContext(Dispatchers.IO) {
+                    val dir = reportsDir(app)
+                    dir.deleteRecursively()
+                    File(dir, report.fileName).also { writeReportPdf(report, image, it, map.notes, map.caption()) }
+                }
+            }.getOrNull()
+            _state.update { it.copy(exporting = false, message = if (file == null) "Le rapport PDF n'a pas pu être créé." else it.message) }
+            file?.let { shareReport(app, it) }
+        }
+    }
 
     /** Plus rien d'affiché sur la carte. */
     private fun UiState.clearedDisplay() = copy(

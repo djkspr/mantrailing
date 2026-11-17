@@ -274,6 +274,21 @@ class ScreensTest {
     }
 
     @Test
+    fun rapport_pdf_depuis_une_piste_ou_une_recherche_affichee() {
+        var exports = 0
+        val state = mutableStateOf(UiState(ready = true, openedTrail = laidTrail, trailLine = laidTrail.points))
+        rule.setContent { MaterialTheme { TrackScreen(state.value, TrackActions(onExportPdf = { exports++ })) } }
+
+        rule.onNodeWithText("PDF").performClick()
+        assertEquals(1, exports)
+
+        // Pendant la création : « PDF… », un nouvel appui ne relance rien.
+        state.value = state.value.copy(exporting = true)
+        rule.onNodeWithText("PDF…").performClick()
+        assertEquals(1, exports)
+    }
+
+    @Test
     fun choix_de_la_piste_au_depart_de_la_recherche() {
         val chosen = mutableListOf<LaidTrail?>()
         rule.setContent {
