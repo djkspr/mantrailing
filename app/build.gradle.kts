@@ -78,6 +78,9 @@ dependencies {
     // Mises à jour proposées dans l'appli (Google Play).
     implementation(libs.play.app.update)
     implementation(libs.play.app.update.ktx)
+    // Déclarée explicitement : les bibliothèques Google Play demandent fragment 1.0.0, trop ancien pour la fenêtre
+    // de mise à jour lancée par registerForActivityResult (lint InvalidFragmentVersionForActivityResult).
+    implementation(libs.androidx.fragment)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
