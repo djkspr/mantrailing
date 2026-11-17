@@ -1,8 +1,16 @@
 'use strict';
 
-// Point d'entrée lancé par Passenger (o2switch) : configuration par variables d'environnement
-// (panneau « Setup Node.js App » ou fichier .env à côté de package.json).
-require('dotenv').config({ path: require('node:path').join(__dirname, '..', '.env') });
+// Point d'entrée lancé par Passenger (o2switch).
+// Secrets (base de données…) hors du dossier de l'application et jamais déployés : ~/.config/mantrailing/.env sur
+// le serveur, lisible du seul compte d'hébergement (le compte FTP de déploiement n'y a pas accès). Autre emplacement :
+// variable MANTRAILING_ENV_FILE. Poste de développement : server/.env.local (non versionné).
+const path = require('node:path');
+const os = require('node:os');
+const dotenv = require('dotenv');
+
+const envFile = process.env.MANTRAILING_ENV_FILE || path.join(os.homedir(), '.config', 'mantrailing', '.env');
+dotenv.config({ path: path.join(__dirname, '..', '.env.local'), quiet: true });
+dotenv.config({ path: envFile, override: true, quiet: true });
 
 const { OAuth2Client } = require('google-auth-library');
 const { createApp } = require('./app');
@@ -11,7 +19,7 @@ const { createPool, migrate } = require('./db');
 const required = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'GOOGLE_CLIENT_ID'];
 const missing = required.filter((key) => !process.env[key]);
 if (missing.length) {
-  console.error(`Configuration incomplète : ${missing.join(', ')}`);
+  console.error(`Configuration incomplète (${envFile}) : ${missing.join(', ')}`);
   process.exit(1);
 }
 

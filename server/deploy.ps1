@@ -6,8 +6,8 @@
 .DESCRIPTION
     1. Tests de l'API contre la base locale (npm run db:local), sauf -SkipTests.
     2. src/version.json : commit déployé, renvoyé par GET /version.
-    3. Envoi par FTP (WinSCP .NET, tools/winscp-automation) : src/, package.json, package-lock.json, et la
-       configuration server/.env.production (non versionnée) sous le nom .env. Jamais node_modules, test/ ni scripts/.
+    3. Envoi par FTP (WinSCP .NET, tools/winscp-automation) : src/, package.json, package-lock.json. Jamais les
+       secrets (~/.config/mantrailing/.env sur le serveur, posé à la main), ni node_modules, test/ ou scripts/.
     4. Redémarrage : tmp/restart.txt (signal de Passenger).
     5. GET <adresse>/version doit renvoyer le commit envoyé.
 
@@ -41,7 +41,6 @@ if ($missingFtp) { throw "Variables FTP absentes : $($missingFtp -join ", ") (co
 $ftpHost = $env:MANTRAILING_FTP_HOST
 $RemotePath = '/' + $RemotePath.Trim('/')
 $remote = { param($name) if ($RemotePath -eq '/') { "/$name" } else { "$RemotePath/$name" } }
-$envFile = Join-Path $serverDir '.env.production'
 
 # Paquet « WinSCP .NET assembly » (build netstandard2.0) extrait dans tools/winscp-automation (non versionné).
 $automationRoot = if ($env:WINSCP_AUTOMATION) { $env:WINSCP_AUTOMATION } else {
@@ -86,15 +85,6 @@ try {
         $result.Check()
         Write-Host ("   {0} fichier(s) envoyé(s)" -f $result.Uploads.Count) -ForegroundColor DarkGray
         $lockChanged = $result.Uploads | Where-Object { $_.FileName -like '*package-lock.json' -or $_.FileName -like '*package.json' }
-
-        # Configuration (mots de passe) : jamais dans le dépôt, envoyée depuis ce poste.
-        if (Test-Path $envFile) {
-            $session.PutFiles($envFile, (& $remote '.env')).Check()
-            Write-Host "   Configuration envoyée (.env.production → .env)" -ForegroundColor DarkGray
-        }
-        elseif (-not $session.FileExists((& $remote '.env'))) {
-            throw "Pas de configuration sur le serveur : copie server/.env.example en server/.env.production, complète-le, puis relance."
-        }
 
         Write-Host "4/5 Redémarrage (Passenger)" -ForegroundColor Cyan
         $restart = Join-Path $env:TEMP 'mantrailing-restart.txt'

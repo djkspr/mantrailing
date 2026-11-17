@@ -55,8 +55,8 @@ $env:MANTRAILING_TEST_SERVER='http://127.0.0.1:3999'; .\gradlew.bat :app:testDeb
    - Application URL : `mantrailing.lesbrasseursdupastel.fr` ;
    - Application startup file : `src/index.js`.
 
-   Aucune variable d'environnement à saisir dans le panneau : la configuration est dans le fichier `.env`
-   (étape 5).
+   Aucune variable d'environnement à saisir dans le panneau : les secrets sont dans un fichier hors du dossier
+   de l'application (étape 5).
 4. **Compte FTP dédié** — cPanel › Comptes FTP : un compte (par exemple `mantrailing@lesbrasseursdupastel.fr`) dont
    le répertoire est **limité à `mantrailing-api`** : le déploiement ne voit rien d'autre sur l'hébergement. Sur ce
    poste, une fois :
@@ -64,8 +64,11 @@ $env:MANTRAILING_TEST_SERVER='http://127.0.0.1:3999'; .\gradlew.bat :app:testDeb
    ```powershell
    .\server\set-deploy-env.ps1     # MANTRAILING_FTP_HOST / _USER / _PASS dans le profil Windows (mot de passe masqué)
    ```
-5. **Configuration du serveur** — copier `server/.env.example` en `server/.env.production` (non versionné) et y
-   mettre le mot de passe de la base. `deploy.ps1` l'envoie sur le serveur sous le nom `.env` à chaque déploiement.
+5. **Secrets du serveur** — posés à la main, une fois, **hors du site et du dossier de l'application** (comme pour
+   l'API de la brasserie, mais dans un dossier à part) : cPanel › Gestionnaire de fichiers, « Afficher les fichiers
+   cachés », créer `/home/gepi9588/.config/mantrailing/.env` à partir de `server/.env.example` (avec le mot de passe
+   de la base), puis Permissions : **600**. Le compte FTP de déploiement, limité à `mantrailing-api`, n'y a pas accès,
+   et `deploy.ps1` n'envoie jamais de `.env`.
 6. **WinSCP** — le paquet « WinSCP .NET assembly » (pas l'installateur) doit être extrait dans
    `tools/winscp-automation` à la racine de ce dépôt (non versionné ; déjà en place sur ce poste).
 7. **Premier envoi** — depuis la racine du dépôt : `.\server\deploy.ps1`, puis dans Setup Node.js App :
@@ -81,4 +84,5 @@ affichera la sauvegarde en ligne.
 ```
 
 Si `package.json` a changé, le script le signale : « Run NPM Install » puis « Restart » dans Setup Node.js App.
-Pour changer un mot de passe : modifier `server/.env.production`, puis `.\server\deploy.ps1 -SkipTests`.
+Pour changer un secret : modifier `/home/gepi9588/.config/mantrailing/.env` (gestionnaire de fichiers), puis
+« Restart » dans Setup Node.js App.
