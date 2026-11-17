@@ -167,6 +167,7 @@ fun SessionsScreen(
                         title = formatSessionDate(session.startedAt).replaceFirstChar { it.uppercase() },
                         line1 = "${session.dogName} · ${sourceLabel(session.source)}" +
                             (session.trailAgeSeconds?.let { " · piste de ${formatDuration(it)}" } ?: "") +
+                            (if (session.corridorMeters != null) " · mode formateur" else "") +
                             spaceSuffix(teams, spaceName(session.spaceId)),
                         line2 = remember(session) { sessionLine(session) } + onlineSuffix(session.archived) + logSuffix(session.log),
                         onClick = { actions.onOpen(session) },

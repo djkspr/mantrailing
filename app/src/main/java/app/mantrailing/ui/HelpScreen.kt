@@ -60,6 +60,15 @@ val HELP_SECTIONS = listOf(
         ),
     ),
     HelpSection(
+        "instructor", "Mode formateur",
+        listOf(
+            "Pour encadrer une équipe : le formateur la suit avec son propre téléphone, sur lequel se trouve la piste (posée avec ce téléphone, reçue par une équipe ou importée en GPX). Le téléphone du maître-chien reste « à l'aveugle ».",
+            "Au départ, choisissez la piste, activez « Mode formateur » et la largeur du couloir (10 à 50 m). La piste s'affiche avec son couloir, et la trace de l'équipe se dessine en direct.",
+            "Quand l'équipe sort du couloir, le téléphone vibre et affiche « HORS COULOIR », même écran éteint ; un rappel suit toutes les 30 s, et une courte vibration annonce le retour. Quelques positions de suite sont nécessaires : un saut du GPS ne déclenche rien.",
+            "La recherche est enregistrée normalement, avec le nombre de sorties du couloir.",
+        ),
+    ),
+    HelpSection(
         "notes", "Notes pendant la recherche",
         listOf(
             "Une note se prend d'un seul appui : hésitation, perte de piste, reprise… Elle est placée sur la trace à l'endroit où elle a été prise.",

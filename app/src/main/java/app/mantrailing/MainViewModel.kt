@@ -61,6 +61,8 @@ import app.mantrailing.weenect.WeenectSession
 import app.mantrailing.gpx.Gpx
 import app.mantrailing.gpx.GpxException
 import app.mantrailing.gpx.GpxTrack
+import app.mantrailing.track.CorridorStatus
+import app.mantrailing.track.DEFAULT_CORRIDOR_METERS
 import app.mantrailing.gpx.GpxOutTrack
 import app.mantrailing.gpx.GpxWaypoint
 import app.mantrailing.gpx.writeGpx
@@ -118,6 +120,10 @@ data class UiState(
     val weenect: WeenectSession? = null,
     /** Tour guidé affiché sur l'accueil (premier lancement, ou revu depuis les paramètres). */
     val showTour: Boolean = false,
+    /** Mode formateur : position de l'équipe par rapport au couloir de la recherche en cours. */
+    val corridor: CorridorStatus? = null,
+    /** Dernière largeur de couloir choisie (mode formateur). */
+    val corridorMeters: Int = DEFAULT_CORRIDOR_METERS,
     /** Fichier GPX lu, en attente : piste posée ou trace d'un chien ? */
     val gpxImport: GpxTrack? = null,
     /** Carnet d'entraînement ouvert (proposé en fin de pose ou de recherche, ou demandé ensuite). */
@@ -267,6 +273,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     quickNotes = store.quickNotes.first(), lastSpaceId = store.lastSpaceId.first(),
                     recordingNotes = if (recording != null) withContext(Dispatchers.IO) { notesBuffer.read() } else emptyList(),
                     showTour = !store.tourDone.first() && recording == null,
+                    corridorMeters = store.corridorMeters.first(),
+                    // Mode formateur repris après un redémarrage : la piste reste affichée.
+                    trailLine = if (recording?.corridorMeters != null) trails.find { t -> t.id == recording.trailId }?.points.orEmpty() else emptyList(),
                 )
             }
             // Enregistre la liste (migration du chien unique d'avant) ; compte connecté sans chien lié : import.
@@ -279,11 +288,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (recording?.source == TrackSource.PHONE && !PhoneRecordingService.running.value &&
                 PhoneRecordingService.hasLocationPermission(getApplication())
             ) {
-                PhoneRecordingService.start(getApplication(), layingTrail = recording.kind == RecordingKind.TRAIL)
+                PhoneRecordingService.start(
+                    getApplication(), layingTrail = recording.kind == RecordingKind.TRAIL,
+                    guideTrailId = recording.trailId.takeIf { recording.corridorMeters != null }, corridorMeters = recording.corridorMeters,
+                )
             }
         }
         viewModelScope.launch {
             PhoneRecordingService.track.collect { track -> _state.update { it.copy(recordingPoints = track.size, recordingTrack = track) } }
+        }
+        viewModelScope.launch {
+            PhoneRecordingService.corridorStatus.collect { status -> _state.update { it.copy(corridor = status) } }
         }
         viewModelScope.launch { initCloud() }
     }
@@ -748,27 +763,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * [remember] : enregistre [source] comme choix pour les recherches suivantes.
      * [trailId] : piste posée que le chien va suivre.
      */
-    fun startRecording(source: TrackSource, remember: Boolean = false, trailId: String? = null, spaceId: String? = null) = run {
+    /**
+     * [corridorMeters] : mode formateur (piste visible, alerte quand l'équipe sort d'un couloir de cette largeur) ;
+     * la position de l'équipe est alors celle de ce téléphone, porté par le formateur.
+     */
+    fun startRecording(
+        source: TrackSource, remember: Boolean = false, trailId: String? = null, spaceId: String? = null, corridorMeters: Int? = null,
+    ) = run {
         if (_state.value.recording != null) return@run
+        val instructor = corridorMeters != null && trailId != null
         if (remember) {
             store.saveTrackSource(source)
             _state.update { it.copy(trackSource = source) }
         }
         val s = _state.value
-        // « Collier » choisi : celui que porte le chien, Tractive ou Weenect.
-        val actual = if (source.isCollar) {
+        // « Collier » choisi : celui que porte le chien, Tractive ou Weenect. Mode formateur : toujours ce téléphone.
+        val actual = if (instructor) {
+            TrackSource.PHONE
+        } else if (source.isCollar) {
             s.collarSourceOf(s.activeDog) ?: error("${s.dogName} n'a pas de collier connecté : connecte son compte dans les paramètres.")
         } else {
             source
         }
         val recording = ActiveRecording(
             UUID.randomUUID().toString(), s.dogName, actual, Instant.now().epochSecond, RecordingKind.SEARCH, trailId, s.activeDog?.id, spaceId,
+            corridorMeters = corridorMeters.takeIf { instructor },
         )
+        if (instructor) {
+            store.saveCorridorMeters(corridorMeters!!)
+            _state.update { it.copy(corridorMeters = corridorMeters) }
+        }
         var message: String? = null
         when (actual) {
             TrackSource.PHONE -> {
                 withContext(Dispatchers.IO) { PhoneRecordingService.bufferOf(getApplication()).clear() }
-                PhoneRecordingService.start(getApplication())
+                PhoneRecordingService.start(getApplication(), guideTrailId = recording.trailId.takeIf { instructor }, corridorMeters = recording.corridorMeters)
             }
             TrackSource.TRACTIVE -> {
                 val session = s.tractive ?: error("Connecte d'abord le collier Tractive dans les paramètres.")
@@ -798,11 +827,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             TrackSource.GPX -> error("Une trace GPX s'importe depuis le menu, elle ne s'enregistre pas.")
         }
         if (actual == TrackSource.WEENECT) keepWeenectLive(recording)
+        if (instructor) {
+            message = "Mode formateur : piste affichée, ce téléphone vibre si l'équipe sort du couloir de ${corridorMeters} m."
+        }
         withContext(Dispatchers.IO) { notesBuffer.clear() }
         store.saveActiveRecording(recording)
         store.saveLastSpaceId(recording.spaceId)
         _state.update { it.copy(lastSpaceId = recording.spaceId) }
         _state.update { it.copy(recording = recording, recordingNotes = emptyList(), message = message).clearedDisplay() }
+        // Mode formateur : la piste suivie est affichée pendant la recherche.
+        if (instructor) {
+            val guide = _state.value.trails.find { it.id == trailId }?.let { fullTrail(it) }
+            _state.update { it.copy(trailLine = guide?.points.orEmpty()) }
+        }
     }
 
     // ---------- Notes pendant la recherche, ou signalements du traceur pendant la pose ----------
@@ -911,6 +948,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val endedAt = Instant.now().epochSecond
         // Issue choisie en terminant : notée à l'heure de fin (écrite avant la relecture des notes).
         if (outcome != null) withContext(Dispatchers.IO) { notesBuffer.append(SearchNote(UUID.randomUUID().toString(), endedAt, outcome)) }
+        // Sorties du couloir (mode formateur), lues avant l'arrêt du GPS qui les efface.
+        val corridorExits = PhoneRecordingService.corridorStatus.value?.exits?.takeIf { recording.corridorMeters != null }
         var message: String? = null
         val segments: List<List<Position>> = when (recording.source) {
             TrackSource.PHONE -> {
@@ -934,6 +973,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             trailId = trail?.id, trail = trail?.points.orEmpty(), trailEndedAt = trail?.endedAt,
             notes = locateNotes(notes, segments.flatten()), dogId = recording.dogId, updatedAt = System.currentTimeMillis(), spaceId = recording.spaceId,
             trailNotes = trail?.notes.orEmpty(), trailWeather = trail?.weather, log = trail?.log?.forSearch(),
+            corridorMeters = recording.corridorMeters, corridorExits = corridorExits ?: recording.corridorMeters?.let { 0 },
         )
         withContext(Dispatchers.IO) {
             repository.save(session)

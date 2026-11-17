@@ -1,5 +1,15 @@
 package app.mantrailing.ui
 
+import androidx.compose.material3.Switch
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.mutableIntStateOf
+import app.mantrailing.track.CORRIDOR_CHOICES
+import app.mantrailing.track.DEFAULT_CORRIDOR_METERS
+import app.mantrailing.track.CorridorStatus
+import app.mantrailing.recording.corridorText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -235,6 +245,10 @@ fun TrackScreen(
                     buildString {
                         append("Recherche du ${formatSessionDate(state.openedSession.startedAt)} · ${sourceLabel(state.openedSession.source)}")
                         state.openedSession.trailAgeSeconds?.let { append(" · piste de ${formatDuration(it)}") }
+                        state.openedSession.corridorMeters?.let { m ->
+                            val exits = state.openedSession.corridorExits ?: 0
+                            append("\nMode formateur : couloir de $m m · $exits sortie${if (exits > 1) "s" else ""}")
+                        }
                         state.openedSession.weather?.let { append("\nMétéo au départ : ${it.summary}") }
                         state.openedSession.trailWeather?.let { append("\nPendant la pose : ${it.summary}") }
                         state.openedSession.log?.summary?.takeIf { it.isNotEmpty() }?.let { append("\nCarnet : $it") }
@@ -281,9 +295,13 @@ fun TrackScreen(
             val layingNotes = remember(laying, state.recordingNotes, state.recordingTrack) {
                 if (laying) locateNotes(state.recordingNotes, state.recordingTrack) else emptyList()
             }
+            // Mode formateur : piste visible avec son couloir, trace de l'équipe en direct, la carte la suit.
+            val corridorMeters = state.recording?.corridorMeters
             TrackMap(
-                state.segments, Modifier.fillMaxSize(), trail = if (laying) state.recordingTrack else state.trailLine,
-                notes = state.notes + state.trailNotes + layingNotes, follow = laying,
+                if (corridorMeters != null) listOf(state.recordingTrack).filter { it.isNotEmpty() } else state.segments,
+                Modifier.fillMaxSize(), trail = if (laying) state.recordingTrack else state.trailLine,
+                notes = state.notes + state.trailNotes + layingNotes, follow = laying || corridorMeters != null,
+                corridorMeters = corridorMeters,
                 onNoteClick = { note -> if (state.trailNotes.any { it.id == note.id }) trailNoteId = note.id else editedNoteId = note.id },
                 onVisibleArea = { visibleArea = it },
             )
@@ -406,10 +424,13 @@ private fun RecordingBanner(state: UiState, onStop: () -> Unit) {
             if (!laying) {
                 val trail = recording.trailId?.let { id -> state.trails.find { it.id == id } }
                 Text(
-                    trail?.let { "Sur la piste posée il y a ${formatDuration((recording.startedAt - it.endedAt).coerceAtLeast(0))} (affichée à l'arrivée)" }
-                        ?: "Sans piste enregistrée",
+                    trail?.let {
+                        "Sur la piste posée il y a ${formatDuration((recording.startedAt - it.endedAt).coerceAtLeast(0))}" +
+                            if (recording.instructor) "" else " (affichée à l'arrivée)"
+                    } ?: "Sans piste enregistrée",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                recording.corridorMeters?.let { CorridorBanner(it, state.corridor) }
                 // Dangers et points d'attention signalés par le traceur : annoncés, sans montrer le tracé.
                 trail?.warnings?.takeIf { it.isNotEmpty() }?.let { TrailWarnings(it, trail.startedAt) }
             }
@@ -417,6 +438,30 @@ private fun RecordingBanner(state: UiState, onStop: () -> Unit) {
                 if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 else Text(if (laying) "Terminer la pose" else "Terminer la recherche")
             }
+        }
+    }
+}
+
+/** Mode formateur : couloir choisi, distance de l'équipe à la piste, alerte en rouge hors du couloir. */
+@Composable
+fun CorridorBanner(widthMeters: Int, status: CorridorStatus?) {
+    val outside = status?.outside == true
+    Surface(
+        color = if (outside) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth().testTag("corridor-status"),
+    ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Text(
+                "Mode formateur · couloir de $widthMeters m" + (status?.exits?.takeIf { it > 0 }?.let { " · $it sortie${if (it > 1) "s" else ""}" } ?: ""),
+                style = MaterialTheme.typography.labelMedium,
+                color = if (outside) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Text(
+                status?.let(::corridorText) ?: "En attente du GPS du téléphone…",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (outside) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSecondaryContainer,
+            )
         }
     }
 }
@@ -442,15 +487,53 @@ fun SourceChoiceDialog(onChoose: (TrackSource) -> Unit, onDismiss: () -> Unit, b
 
 /** Au départ d'une recherche : quelle piste posée le chien va-t-il suivre ? */
 @Composable
-fun TrailChoiceDialog(trails: List<LaidTrail>, now: Long, onChoose: (LaidTrail?) -> Unit, onDismiss: () -> Unit) {
+fun TrailChoiceDialog(
+    trails: List<LaidTrail>,
+    now: Long,
+    onChoose: (LaidTrail?) -> Unit,
+    onDismiss: () -> Unit,
+    /** Mode formateur proposé : piste choisie et largeur du couloir (null : option absente). */
+    onChooseInstructor: ((LaidTrail, Int) -> Unit)? = null,
+    corridorDefault: Int = DEFAULT_CORRIDOR_METERS,
+) {
+    var instructor by rememberSaveable { mutableStateOf(false) }
+    var corridor by rememberSaveable { mutableIntStateOf(corridorDefault) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Quelle piste ?") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("La piste ne sera affichée qu'à l'arrivée du chien.", style = MaterialTheme.typography.bodySmall)
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    if (instructor) "Mode formateur : la piste est affichée, et ce téléphone vibre quand l'équipe sort du couloir."
+                    else "La piste ne sera affichée qu'à l'arrivée du chien.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (onChooseInstructor != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Mode formateur (piste visible, alerte de couloir)", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        Switch(checked = instructor, onCheckedChange = { instructor = it }, modifier = Modifier.testTag("instructor-mode"))
+                    }
+                    if (instructor) {
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            CORRIDOR_CHOICES.forEach { m ->
+                                FilterChip(
+                                    selected = corridor == m, onClick = { corridor = m }, label = { Text("$m m") },
+                                    modifier = Modifier.testTag("corridor-$m"),
+                                )
+                            }
+                        }
+                        Text(
+                            "Le formateur suit l'équipe avec ce téléphone : c'est son GPS qui situe l'équipe, même avec un collier.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 trails.forEach { trail ->
-                    OutlinedButton(onClick = { onChoose(trail) }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { if (instructor && onChooseInstructor != null) onChooseInstructor(trail, corridor) else onChoose(trail) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Column(Modifier.fillMaxWidth()) {
                             Text("Posée il y a ${formatDuration((now - trail.endedAt).coerceAtLeast(0))}")
                             Text(
@@ -466,7 +549,7 @@ fun TrailChoiceDialog(trails: List<LaidTrail>, now: Long, onChoose: (LaidTrail?)
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onChoose(null) }) { Text("Sans piste") } },
+        confirmButton = { if (!instructor) TextButton(onClick = { onChoose(null) }) { Text("Sans piste") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
     )
 }
