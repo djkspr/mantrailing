@@ -33,4 +33,22 @@ Write-Host "Identifiants FTP du déploiement de l'API Mantrailing (compte FTP d�
 Ask 'MANTRAILING_FTP_HOST' 'Serveur FTP' 'ftp.lesbrasseursdupastel.fr'
 Ask 'MANTRAILING_FTP_USER' 'Utilisateur FTP (ex. mantrailing@lesbrasseursdupastel.fr)' ''
 Ask 'MANTRAILING_FTP_PASS' 'Mot de passe FTP' '' -Secret
+
+# Secret des routes de déploiement (installation npm, migrations) : même valeur ici et dans le .env du serveur.
+Write-Host ""
+Write-Host "Secret de déploiement (installation des dépendances et migrations par l'API)." -ForegroundColor Cyan
+$current = [Environment]::GetEnvironmentVariable('MANTRAILING_DEPLOY_SECRET', 'User')
+$answer = Read-Host $(if ($current) { "Déjà défini : Entrée pour le garder, « nouveau » pour en générer un autre" } else { "Entrée pour en générer un" })
+if (-not $current -or $answer -eq 'nouveau') {
+    $bytes = [byte[]]::new(32)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $secret = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    [Environment]::SetEnvironmentVariable('MANTRAILING_DEPLOY_SECRET', $secret, 'User')
+    $env:MANTRAILING_DEPLOY_SECRET = $secret
+    Write-Host ""
+    Write-Host "Ajoute (ou remplace) cette ligne dans /home/gepi9588/.config/mantrailing/.env sur o2switch, puis « Restart » :" -ForegroundColor Yellow
+    Write-Host "DEPLOY_SECRET=$secret"
+    try { "DEPLOY_SECRET=$secret" | Set-Clipboard; Write-Host "(ligne copiée dans le presse-papiers)" -ForegroundColor DarkGray } catch { }
+}
+Write-Host ""
 Write-Host "Enregistré dans le profil Windows. Les nouvelles fenêtres PowerShell (et VS Code relancé) les verront." -ForegroundColor Green

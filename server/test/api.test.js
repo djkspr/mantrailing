@@ -1,18 +1,16 @@
 'use strict';
 
-// Tests de l'API contre une vraie base MariaDB (npm run db:local), connexion Google simulée.
+// Tests de l'API contre une vraie base MariaDB (npm run db:local), neuve et construite par les migrations,
+// connexion Google simulée.
 const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { createApp } = require('../src/app');
-const { createPool, migrate } = require('../src/db');
+const { freshDatabase } = require('./helpers/db');
 
-const pool = createPool({
-  dbHost: process.env.TEST_DB_HOST || '127.0.0.1',
-  dbPort: Number(process.env.TEST_DB_PORT || 3307),
-  dbUser: process.env.TEST_DB_USER || 'root',
-  dbPassword: process.env.TEST_DB_PASSWORD || 'root',
-  dbName: process.env.TEST_DB_NAME || 'mantrailing_test',
-});
+let db;
+let knex;
+// Vérifications directes en base : knex.raw rend [lignes, champs], comme mysql2.
+const pool = { query: (statement, params) => knex.raw(statement, params ?? []) };
 
 // Jeton Google de test : « google:<sub>:<nom> » ; tout autre jeton est refusé.
 async function verifyGoogleToken(idToken) {
@@ -25,8 +23,8 @@ let server;
 let base;
 
 before(async () => {
-  await migrate(pool);
-  const app = createApp({ pool, verifyGoogleToken, version: { commit: 'test' }, rateLimits: false });
+  ({ db, knex } = await freshDatabase());
+  const app = createApp({ db, verifyGoogleToken, version: { commit: 'test' }, rateLimits: false });
   await new Promise((resolve) => {
     server = app.listen(0, resolve);
   });
@@ -35,7 +33,8 @@ before(async () => {
 
 after(async () => {
   server.close();
-  await pool.end();
+  await db.destroy();
+  await knex.destroy();
 });
 
 beforeEach(async () => {

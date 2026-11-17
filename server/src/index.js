@@ -1,20 +1,14 @@
 'use strict';
 
-// Point d'entrée lancé par Passenger (o2switch).
-// Secrets (base de données…) hors du dossier de l'application et jamais déployés : ~/.config/mantrailing/.env sur
-// le serveur, lisible du seul compte d'hébergement (le compte FTP de déploiement n'y a pas accès). Autre emplacement :
-// variable MANTRAILING_ENV_FILE. Poste de développement : server/.env.local (non versionné).
+// Point d'entrée lancé par Passenger (o2switch). Configuration : src/config.js (~/.config/mantrailing/.env sur le
+// serveur, server/.env.local en local). La structure de la base n'est PAS modifiée au démarrage : migrations et seeds
+// sont lancés par le déploiement (POST /deploy/run-migrations), comme pour l'API de la brasserie.
 const path = require('node:path');
-const os = require('node:os');
-const dotenv = require('dotenv');
-
-const envFile = process.env.MANTRAILING_ENV_FILE || path.join(os.homedir(), '.config', 'mantrailing', '.env');
-dotenv.config({ path: path.join(__dirname, '..', '.env.local'), quiet: true });
-dotenv.config({ path: envFile, override: true, quiet: true });
-
+const { envFile, dbConfigFromEnv } = require('./config');
 const { OAuth2Client } = require('google-auth-library');
 const { createApp } = require('./app');
-const { createPool, migrate } = require('./db');
+const { createDatabase } = require('./db');
+const { runMigrationsAndSeeds } = require('../migrate');
 
 const required = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'GOOGLE_CLIENT_ID'];
 const missing = required.filter((key) => !process.env[key]);
@@ -23,13 +17,7 @@ if (missing.length) {
   process.exit(1);
 }
 
-const pool = createPool({
-  dbHost: process.env.DB_HOST,
-  dbPort: Number(process.env.DB_PORT || 3306),
-  dbUser: process.env.DB_USER,
-  dbPassword: process.env.DB_PASSWORD,
-  dbName: process.env.DB_NAME,
-});
+const { db, knex } = createDatabase(dbConfigFromEnv());
 
 // Jeton Google émis pour l'identifiant « Web » du projet (celui que l'appli demande).
 const google = new OAuth2Client();
@@ -47,13 +35,15 @@ try {
   // Pas de version.json en local : écrit par deploy.ps1 au moment de l'envoi.
 }
 
-migrate(pool)
-  .then(() => {
-    const app = createApp({ pool, verifyGoogleToken, version });
-    const port = Number(process.env.PORT || 3000);
-    app.listen(port, () => console.log(`mantrailing-api à l'écoute (port ${port})`));
-  })
-  .catch((err) => {
-    console.error('Base de données inaccessible :', err.message);
-    process.exit(1);
-  });
+const app = createApp({
+  db,
+  verifyGoogleToken,
+  version,
+  deploy: {
+    appRoot: path.join(__dirname, '..'),
+    secret: process.env.DEPLOY_SECRET,
+    runMigrations: () => runMigrationsAndSeeds(knex),
+  },
+});
+const port = Number(process.env.PORT || 3000);
+app.listen(port, () => console.log(`API Mantrailing à l'écoute (port ${port})`));

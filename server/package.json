@@ -11,13 +11,18 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
-    "db:local": "node scripts/local-db.js"
+    "test:all": "node scripts/test-all.js",
+    "db:local": "node scripts/local-db.js",
+    "migrate": "node migrate.js",
+    "migrate:make": "knex migrate:make --knexfile knexfile.js -x js"
   },
   "dependencies": {
     "dotenv": "17.2.3",
     "express": "5.1.0",
     "express-rate-limit": "8.7.1",
     "google-auth-library": "10.5.0",
+    "knex": "3.1.0",
+    "kysely": "0.28.11",
     "mysql2": "3.16.3",
     "zod": "4.6.7"
   }
