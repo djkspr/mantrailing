@@ -570,7 +570,7 @@ class ScreensTest {
 
         rule.onNodeWithText("Trace du chien").performScrollTo().assertIsDisplayed()
         rule.onNodeWithText("GPS du téléphone").performScrollTo().performClick()
-        rule.onNodeWithText("Collier Tractive").performScrollTo().performClick()
+        rule.onNodeWithText("Collier du chien").performScrollTo().performClick()
 
         assertEquals(listOf(TrackSource.PHONE, TrackSource.TRACTIVE), chosen)
     }
@@ -580,8 +580,8 @@ class ScreensTest {
         val chosen = mutableListOf<TrackSource>()
         rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onTrackSource = { chosen += it }), SettingsPage.COLLARS) } }
 
-        rule.onNodeWithText("Connecte d'abord un compte Tractive ci-dessus.").performScrollTo().assertIsDisplayed()
-        rule.onNodeWithText("Collier Tractive").performScrollTo().performClick()
+        rule.onNodeWithText("Connecte d'abord un compte Tractive ou Weenect ci-dessus.").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Collier du chien").performScrollTo().performClick()
 
         assertTrue(chosen.isEmpty())
     }
@@ -593,11 +593,11 @@ class ScreensTest {
         var sent: Pair<String, String>? = null
         rule.setContent { MaterialTheme { SettingsScreen(UiState(ready = true), SettingsActions(onLogin = { e, p -> sent = e to p }), SettingsPage.COLLARS) } }
 
-        rule.onNodeWithText("Se connecter").assertIsNotEnabled()
+        rule.onNodeWithTag("login").assertIsNotEnabled()
         rule.onNodeWithTag("email").performTextInput("moi@example.com")
-        rule.onNodeWithText("Se connecter").assertIsNotEnabled()
+        rule.onNodeWithTag("login").assertIsNotEnabled()
         rule.onNodeWithTag("password").performTextInput("secret")
-        rule.onNodeWithText("Se connecter").assertIsEnabled().performClick()
+        rule.onNodeWithTag("login").assertIsEnabled().performClick()
 
         assertEquals("moi@example.com" to "secret", sent)
     }
@@ -770,5 +770,84 @@ class ScreensTest {
         rule.onNodeWithText("activez-la d'abord", substring = true).assertIsDisplayed()
         rule.onNodeWithText("Sauvegarde en ligne").performClick()
         rule.onNodeWithText("Pistes, recherches et chiens sont copiés", substring = true).assertIsDisplayed()
+    }
+
+    // --- Weenect et import GPX ---
+
+    @Test
+    fun parametres_compte_weenect_a_cote_de_tractive() {
+        var sent: Pair<String, String>? = null
+        rule.setContent {
+            MaterialTheme { SettingsScreen(connected, SettingsActions(onWeenectLogin = { e, p -> sent = e to p }), SettingsPage.COLLARS) }
+        }
+        rule.onNodeWithTag("tractive-account").assertIsDisplayed()
+        rule.onNodeWithTag("weenect-login").performScrollTo().assertIsNotEnabled()
+        rule.onNodeWithTag("weenect-email").performScrollTo().performTextInput("moi@example.com")
+        rule.onNodeWithTag("weenect-password").performScrollTo().performTextInput("secret")
+        rule.onNodeWithTag("weenect-login").performScrollTo().performClick()
+        rule.onNodeWithText("Garmin Alpha ou autre GPS", substring = true).performScrollTo().assertIsDisplayed()
+
+        assertEquals("moi@example.com" to "secret", sent)
+    }
+
+    @Test
+    fun parametres_chien_avec_collier_weenect() {
+        val milo = Dog("d3", "Milo", weenectTrackerId = "100")
+        val state = UiState(ready = true, weenect = app.mantrailing.weenect.WeenectSession("t"), dogs = listOf(milo), activeDogId = milo.id)
+        rule.setContent { MaterialTheme { SettingsScreen(state, SettingsActions()) } }
+
+        rule.onNodeWithText("Weenect connecté · trace par le collier").assertIsDisplayed()
+        rule.onNodeWithTag("settings-collars").performClick()
+        rule.onNodeWithText("Avec traceur : Milo").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithContentDescription("Retour").performClick()
+        rule.onNodeWithTag("settings-dogs").performClick()
+        rule.onNodeWithText("Porte un collier Weenect").assertIsDisplayed()
+    }
+
+    @Test
+    fun import_gpx_trace_d_un_chien_sur_une_piste_posee() {
+        val start = laidTrail.endedAt + 1_800
+        val dogTrack = app.mantrailing.gpx.GpxTrack(
+            "Alpha 17/11",
+            listOf((0..10).map { Position(start + it * 30L, 48.0 + it * 0.0003, 2.0) }),
+            hasTimes = true,
+        )
+        val searches = mutableListOf<Pair<String?, String?>>()
+        rule.setContent {
+            MaterialTheme {
+                GpxImportDialog(dogTrack, listOf(rex, nala), rex.id, listOf(laidTrail), onTrail = {}, onSearch = { d, t -> searches += d to t }, onDismiss = {})
+            }
+        }
+        rule.onNodeWithText("Importer « Alpha 17/11 »").assertIsDisplayed()
+        rule.onNodeWithTag("gpx-summary").assertTextContains("334 m", substring = true).assertTextContains("5 min", substring = true)
+        rule.onNodeWithText("Nala").performClick()
+        // Piste posée 30 min avant le départ du chien : proposée.
+        rule.onNodeWithTag("gpx-trail-${laidTrail.id}").performClick()
+        rule.onNodeWithTag("gpx-import").performClick()
+
+        assertEquals(listOf(nala.id to laidTrail.id), searches)
+    }
+
+    @Test
+    fun import_gpx_comme_piste_posee() {
+        val track = app.mantrailing.gpx.GpxTrack(null, listOf((0..3).map { Position(it.toLong(), 48.0 + it * 0.001, 2.0) }), hasTimes = false)
+        var trails = 0
+        rule.setContent {
+            MaterialTheme { GpxImportDialog(track, emptyList(), null, emptyList(), onTrail = { trails++ }, onSearch = { _, _ -> }, onDismiss = {}) }
+        }
+        rule.onNodeWithText("sans heures", substring = true).assertIsDisplayed()
+        rule.onNodeWithTag("gpx-as-trail").performClick()
+        rule.onNodeWithText("Piste suivie").assertDoesNotExist()
+        rule.onNodeWithTag("gpx-import").performClick()
+        assertEquals(1, trails)
+    }
+
+    @Test
+    fun menu_importer_un_fichier_gpx() {
+        var imports = 0
+        rule.setContent { MaterialTheme { TrackScreen(UiState(ready = true), TrackActions(onImportGpx = { imports++ })) } }
+        rule.onNodeWithContentDescription("Menu").performClick()
+        rule.onNodeWithText("Importer un fichier GPX").performClick()
+        assertEquals(1, imports)
     }
 }

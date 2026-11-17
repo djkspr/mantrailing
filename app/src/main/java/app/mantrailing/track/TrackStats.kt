@@ -40,8 +40,8 @@ data class TrackStats(
     }
 }
 
-/** Capteurs comptés comme du GPS : celui du collier Tractive et celui du téléphone. */
-val GPS_SENSORS = setOf("GPS", PHONE_GPS_SENSOR)
+/** Capteurs comptés comme du GPS : colliers (Tractive, Weenect), téléphone, fichier GPX (Garmin…). */
+val GPS_SENSORS = setOf("GPS", PHONE_GPS_SENSOR, app.mantrailing.gpx.GPX_SENSOR)
 const val PHONE_GPS_SENSOR = "PHONE_GPS"
 
 private const val EARTH_RADIUS_M = 6_371_000.0

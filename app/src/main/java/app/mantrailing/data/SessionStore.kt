@@ -23,6 +23,7 @@ import app.mantrailing.session.formatQuickNotes
 import app.mantrailing.session.parseDogs
 import app.mantrailing.session.parseQuickNotes
 import app.mantrailing.tractive.Session
+import app.mantrailing.weenect.WeenectSession
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -40,6 +41,9 @@ class SessionStore(private val context: Context) {
         val token = p[TOKEN] ?: return@map null
         Session(userId, token, p[EXPIRES_AT] ?: 0)
     }
+
+    /** Compte Weenect connecté. */
+    val weenect: Flow<WeenectSession?> = context.dataStore.data.map { p -> p[WEENECT_TOKEN]?.let(::WeenectSession) }
 
     /** Chiens de l'équipe ; avant les chiens multiples, le chien Tractive choisi devient le premier. */
     val dogs: Flow<List<Dog>> = context.dataStore.data.map { p -> p[DOGS]?.let(::parseDogs) ?: legacyDog(p) }
@@ -154,6 +158,10 @@ class SessionStore(private val context: Context) {
         }
     }
 
+    suspend fun saveWeenect(session: WeenectSession?) {
+        context.dataStore.edit { if (session == null) it.remove(WEENECT_TOKEN) else it[WEENECT_TOKEN] = session.token }
+    }
+
     suspend fun saveTrackSource(source: TrackSource) {
         context.dataStore.edit { it[TRACK_SOURCE] = source.name }
     }
@@ -187,6 +195,7 @@ class SessionStore(private val context: Context) {
     private companion object {
         val USER_ID = stringPreferencesKey("user_id")
         val TOKEN = stringPreferencesKey("access_token")
+        val WEENECT_TOKEN = stringPreferencesKey("weenect_token")
         val EXPIRES_AT = longPreferencesKey("expires_at")
         // Chien Tractive unique, avant les chiens multiples : lu une fois pour la migration.
         val PET_ID = stringPreferencesKey("pet_id")

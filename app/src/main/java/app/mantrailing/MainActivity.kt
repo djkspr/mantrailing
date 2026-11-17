@@ -50,6 +50,7 @@ import app.mantrailing.ui.SessionsScreen
 import app.mantrailing.ui.SettingsActions
 import app.mantrailing.ui.SettingsScreen
 import app.mantrailing.ui.SourceChoiceDialog
+import app.mantrailing.ui.GpxImportDialog
 import app.mantrailing.ui.TrackActions
 import app.mantrailing.ui.TrackScreen
 
@@ -123,6 +124,9 @@ private fun App(
         if (screen == Screen.SETTINGS && state.demo) screen = Screen.HOME
     }
 
+    // Fichier GPX choisi dans le téléphone (Téléchargements, Drive…) : lu, puis on demande ce que c'est.
+    val gpxPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importGpx) }
+
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         when {
             result[Manifest.permission.ACCESS_FINE_LOCATION] != true ->
@@ -175,7 +179,7 @@ private fun App(
     /** Recherche dans l'espace [spaceId] : source de la trace, proposée si besoin, puis départ. */
     fun searchIn(spaceId: String?) {
         pendingSpaceId = spaceId
-        when (val decision = decideSource(state.trackSource, state.connected)) {
+        when (val decision = decideSource(state.trackSource, state.collarReady)) {
             StartDecision.AskSource -> askSource = true
             is StartDecision.Start -> startWith(decision.source, remember = false)
         }
@@ -212,6 +216,9 @@ private fun App(
                     onSelectDog = vm::selectDog,
                     onMoveDog = vm::moveDog,
                     onLogout = vm::logout,
+                    onWeenectLogin = vm::loginWeenect,
+                    onWeenectLogout = vm::logoutWeenect,
+                    onSyncWeenect = vm::syncWeenectDogs,
                     onTrackSource = vm::setTrackSource,
                     onQuickNotes = vm::setQuickNotes,
                     cloud = CloudActions(
@@ -271,6 +278,8 @@ private fun App(
                 onOpenSessions = { screen = Screen.SESSIONS },
                 onCloseSession = vm::closeSession,
                 onExportPdf = vm::exportPdf,
+                // Le type MIME d'un .gpx varie selon l'appli qui l'a enregistré : tous les fichiers sont proposés.
+                onImportGpx = { gpxPicker.launch(arrayOf("*/*")) },
                 onAddNote = vm::addNote,
                 onUndoNote = vm::undoLastNote,
                 onUpdateNote = vm::updateNote,
@@ -306,6 +315,16 @@ private fun App(
         SourceChoiceDialog(
             onChoose = { source -> askSource = false; startWith(source, remember = true) },
             onDismiss = { askSource = false },
+            brand = if (state.collarSourceOf(state.activeDog) == TrackSource.WEENECT) "Weenect" else "Tractive",
+        )
+    }
+
+    state.gpxImport?.let { track ->
+        GpxImportDialog(
+            track, state.dogs, state.activeDogId, state.trails,
+            onTrail = vm::importGpxAsTrail,
+            onSearch = vm::importGpxAsSearch,
+            onDismiss = vm::cancelGpxImport,
         )
     }
 }

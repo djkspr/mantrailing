@@ -6,8 +6,8 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 /**
- * Un chien de l'équipe. [tractivePetId] et [trackerId] : animal et collier du compte Tractive, s'il en porte un.
- * Sans collier, sa trace est prise au GPS du téléphone.
+ * Un chien de l'équipe. [tractivePetId] et [trackerId] : animal et collier du compte Tractive, s'il en porte un ;
+ * [weenectTrackerId] : son traceur Weenect. Sans collier, sa trace est prise au GPS du téléphone.
  */
 @Serializable
 data class Dog(
@@ -19,8 +19,16 @@ data class Dog(
     val updatedAt: Long = 0,
     /** Équipe qui partage ce chien (null : espace perso). */
     val spaceId: String? = null,
+    val weenectTrackerId: String? = null,
 ) {
-    val hasCollar: Boolean get() = trackerId != null
+    val hasCollar: Boolean get() = trackerId != null || weenectTrackerId != null
+
+    /** Marque du collier, pour l'affichage. */
+    val collarBrand: String? get() = when {
+        trackerId != null -> "Tractive"
+        weenectTrackerId != null -> "Weenect"
+        else -> null
+    }
 }
 
 private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -52,6 +60,31 @@ fun mergeTractivePets(dogs: List<Dog>, pets: List<Pet>, ignoredPetIds: Set<Strin
     }
     return result
 }
+
+/**
+ * Ajoute les traceurs du compte Weenect à la liste des chiens, comme [mergeTractivePets] : lien gardé, chien
+ * de même nom sans traceur Weenect lié, sinon nouveau chien (sauf s'il a été retiré : [ignoredIds]).
+ */
+fun mergeWeenectTrackers(dogs: List<Dog>, trackers: List<app.mantrailing.weenect.WeenectTracker>, ignoredIds: Set<String>): List<Dog> {
+    var result = dogs
+    for (tracker in trackers) {
+        val linked = result.find { it.weenectTrackerId == tracker.id }
+        val sameName = result.find { it.weenectTrackerId == null && it.name.trim().equals(tracker.name.trim(), ignoreCase = true) }
+        result = when {
+            linked != null -> result
+            sameName != null -> result.map { if (it.id == sameName.id) it.copy(weenectTrackerId = tracker.id) else it }
+            weenectIgnoreKey(tracker.id) in ignoredIds -> result
+            else -> result + Dog(weenectDogId(tracker.id), tracker.name, weenectTrackerId = tracker.id)
+        }
+    }
+    return result
+}
+
+/** Identifiant d'un chien importé de Weenect : le même sur tous les téléphones. */
+fun weenectDogId(trackerId: String) = "weenect-$trackerId"
+
+/** Traceur Weenect retiré de l'appli, noté avec les animaux Tractive retirés. */
+fun weenectIgnoreKey(trackerId: String) = "weenect:$trackerId"
 
 /** Identifiant d'un chien importé de Tractive : le même sur tous les téléphones (pas de doublon après synchronisation). */
 fun tractiveDogId(petId: String) = "tractive-$petId"

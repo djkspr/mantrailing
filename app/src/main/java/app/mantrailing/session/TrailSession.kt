@@ -7,9 +7,16 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 
-/** D'où vient la trace du chien. */
+/**
+ * D'où vient la trace du chien. En préférence (paramètres), [TRACTIVE] veut dire « le collier du chien », quelle que
+ * soit sa marque : la recherche prend ensuite la source réelle ([TRACTIVE] ou [WEENECT]).
+ */
 @Serializable
-enum class TrackSource { TRACTIVE, PHONE }
+enum class TrackSource { TRACTIVE, PHONE, WEENECT, GPX;
+
+    /** Trace transmise par un collier connecté. */
+    val isCollar: Boolean get() = this == TRACTIVE || this == WEENECT
+}
 
 /** Ce qu'on enregistre : la piste posée par le traceur, ou la recherche du chien. */
 enum class RecordingKind { TRAIL, SEARCH }

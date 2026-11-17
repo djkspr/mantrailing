@@ -66,6 +66,10 @@ data class SettingsActions(
     /** Partage un chien avec une équipe, ou le reprend en perso. */
     val onMoveDog: (Dog, String?) -> Unit = { _, _ -> },
     val onLogout: () -> Unit = {},
+    val onWeenectLogin: (String, String) -> Unit = { _, _ -> },
+    val onWeenectLogout: () -> Unit = {},
+    /** Réimporte les traceurs du compte Weenect. */
+    val onSyncWeenect: () -> Unit = {},
     val onTrackSource: (TrackSource) -> Unit = {},
     val onQuickNotes: (List<NoteType>) -> Unit = {},
     val cloud: CloudActions = CloudActions(),
@@ -88,9 +92,10 @@ fun settingsSummary(page: SettingsPage, state: UiState, now: Long): String = whe
         else -> state.dogs.joinToString { if (it.id == state.activeDogId && state.dogs.size > 1) "${it.name} (actif)" else it.name }
     }
     SettingsPage.COLLARS -> {
-        val collars = state.tractive != null && state.dogs.any { it.hasCollar }
+        val accounts = listOfNotNull("Tractive".takeIf { state.tractive != null }, "Weenect".takeIf { state.weenect != null })
+        val collars = state.dogs.any { state.collarSourceOf(it) != null }
         val source = if (collars && state.trackSource != TrackSource.PHONE) "trace par le collier" else "trace par le téléphone"
-        (if (state.tractive != null) "Tractive connecté" else "Aucun collier connecté") + " · $source"
+        (if (accounts.isEmpty()) "Aucun collier connecté" else accounts.joinToString(" et ") + " connecté" + if (accounts.size > 1) "s" else "") + " · $source"
     }
     SettingsPage.BACKUP -> when {
         !state.cloud.available -> "Pas encore disponible"
@@ -186,9 +191,14 @@ private fun SettingsMenu(state: UiState, now: Long, onOpen: (SettingsPage) -> Un
 @Composable
 private fun CollarsSetting(state: UiState, actions: SettingsActions) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        // Un seul message pour les deux comptes (connexion refusée, chiens importés…).
+        if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        state.message?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("collars-message"))
+        }
         Text("Tractive", style = MaterialTheme.typography.titleMedium)
         if (state.tractive == null) {
-            LoginForm(state, actions.onLogin)
+            LoginForm(state, actions.onLogin, brand = "Tractive", tagPrefix = "")
         } else {
             val collars = state.dogs.filter { it.hasCollar }
             Card(Modifier.fillMaxWidth().testTag("tractive-account")) {
@@ -202,11 +212,34 @@ private fun CollarsSetting(state: UiState, actions: SettingsActions) {
                         OutlinedButton(onClick = actions.onSyncDogs, enabled = !state.busy) { Text("Actualiser les chiens") }
                         TextButton(onClick = actions.onLogout) { Text("Se déconnecter") }
                     }
-                    if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
             }
         }
+        HorizontalDivider()
+        Text("Weenect", style = MaterialTheme.typography.titleMedium)
+        if (state.weenect == null) {
+            LoginForm(state, actions.onWeenectLogin, brand = "Weenect", tagPrefix = "weenect-")
+        } else {
+            val collars = state.dogs.filter { it.weenectTrackerId != null }
+            Card(Modifier.fillMaxWidth().testTag("weenect-account")) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Compte Weenect connecté", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (collars.isEmpty()) "Aucun chien avec traceur." else "Avec traceur : ${collars.joinToString { it.name }}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = actions.onSyncWeenect, enabled = !state.busy) { Text("Actualiser les chiens") }
+                        TextButton(onClick = actions.onWeenectLogout) { Text("Se déconnecter") }
+                    }
+                }
+            }
+        }
+        Text(
+            "Garmin Alpha ou autre GPS : exportez la trace en fichier GPX, puis « Importer un fichier GPX » depuis le menu de l'accueil.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         HorizontalDivider()
         TrackSourceSetting(state, actions.onTrackSource)
     }
@@ -219,7 +252,7 @@ private fun AboutSetting() {
         Text("Mantrailing ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.titleMedium)
         TextButton(onClick = { uriHandler.openUri(PRIVACY_POLICY_URL) }) { Text("Politique de confidentialité") }
         Text(
-            "Application indépendante, ni affiliée à Tractive, ni approuvée par Tractive.",
+            "Application indépendante, ni affiliée à Tractive ni à Weenect, ni approuvée par eux.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -229,7 +262,7 @@ private fun AboutSetting() {
 @Composable
 private fun TrackSourceSetting(state: UiState, onSelect: (TrackSource) -> Unit) {
     // Sans choix enregistré : le collier s'il y en a un, sinon le téléphone (comme au démarrage d'une recherche).
-    val collars = state.tractive != null && state.dogs.any { it.hasCollar }
+    val collars = state.dogs.any { state.collarSourceOf(it) != null }
     val selected = when {
         !collars -> TrackSource.PHONE
         else -> state.trackSource ?: TrackSource.TRACTIVE
@@ -238,8 +271,8 @@ private fun TrackSourceSetting(state: UiState, onSelect: (TrackSource) -> Unit) 
         Text("Trace du chien", style = MaterialTheme.typography.titleMedium)
         Text("Source utilisée pour enregistrer les recherches. Un chien sans collier est toujours suivi au téléphone.", style = MaterialTheme.typography.bodySmall)
         SourceOption(
-            label = "Collier Tractive",
-            detail = if (collars) "Le mode LIVE est activé automatiquement pendant la recherche." else "Connecte d'abord un compte Tractive ci-dessus.",
+            label = "Collier du chien",
+            detail = if (collars) "Tractive (mode LIVE) ou Weenect (super live), activé automatiquement pendant la recherche." else "Connecte d'abord un compte Tractive ou Weenect ci-dessus.",
             selected = selected == TrackSource.TRACTIVE,
             enabled = collars,
             onClick = { onSelect(TrackSource.TRACTIVE) },
@@ -269,32 +302,31 @@ private fun SourceOption(label: String, detail: String, selected: Boolean, enabl
 }
 
 @Composable
-private fun LoginForm(state: UiState, onLogin: (String, String) -> Unit) {
+private fun LoginForm(state: UiState, onLogin: (String, String) -> Unit, brand: String, tagPrefix: String) {
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     val canSubmit = email.isNotBlank() && password.isNotEmpty() && !state.busy
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            "Connecte ton compte Tractive pour récupérer la trace GPS du collier. " +
+            "Connecte ton compte $brand pour récupérer la trace GPS du collier. " +
                 "Le mot de passe n'est pas conservé : seul un jeton de connexion reste sur le téléphone.",
             style = MaterialTheme.typography.bodyMedium,
         )
         OutlinedTextField(
             value = email, onValueChange = { email = it },
-            label = { Text("Email Tractive") }, singleLine = true,
+            label = { Text("Email $brand") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-            modifier = Modifier.fillMaxWidth().testTag("email"),
+            modifier = Modifier.fillMaxWidth().testTag("${tagPrefix}email"),
         )
         OutlinedTextField(
             value = password, onValueChange = { password = it },
             label = { Text("Mot de passe") }, singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-            modifier = Modifier.fillMaxWidth().testTag("password"),
+            modifier = Modifier.fillMaxWidth().testTag("${tagPrefix}password"),
         )
-        state.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Button(onClick = { onLogin(email, password) }, enabled = canSubmit, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { onLogin(email, password) }, enabled = canSubmit, modifier = Modifier.fillMaxWidth().testTag("${tagPrefix}login")) {
             if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Se connecter")
         }
     }

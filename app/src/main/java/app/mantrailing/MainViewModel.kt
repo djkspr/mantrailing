@@ -1,6 +1,7 @@
 package app.mantrailing
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.mantrailing.data.SessionStore
@@ -46,8 +47,18 @@ import app.mantrailing.session.TrailSession
 import app.mantrailing.track.TrackStats
 import app.mantrailing.tractive.Position
 import app.mantrailing.tractive.TractiveApi
+import app.mantrailing.weenect.WeenectApi
+import app.mantrailing.weenect.WeenectAuthException
+import app.mantrailing.weenect.WeenectSession
+import app.mantrailing.gpx.Gpx
+import app.mantrailing.gpx.GpxException
+import app.mantrailing.gpx.GpxTrack
+import app.mantrailing.session.mergeWeenectTrackers
+import app.mantrailing.session.weenectIgnoreKey
 import app.mantrailing.tractive.TractiveAuthException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -83,10 +94,17 @@ data class TimeRange(val date: LocalDate, val start: LocalTime, val end: LocalTi
     }
 }
 
+/** Le super live Weenect dure quelques minutes : redemandé avant qu'il s'arrête. */
+private const val WEENECT_LIVE_RENEW_MS = 4 * 60_000L
+
 data class UiState(
     val ready: Boolean = false,
     /** Compte Tractive connecté. */
     val tractive: Session? = null,
+    /** Compte Weenect connecté. */
+    val weenect: WeenectSession? = null,
+    /** Fichier GPX lu, en attente : piste posée ou trace d'un chien ? */
+    val gpxImport: GpxTrack? = null,
     /** Chiens de l'équipe. */
     val dogs: List<Dog> = emptyList(),
     /** Chien sélectionné : c'est lui qui cherche. */
@@ -134,12 +152,26 @@ data class UiState(
 ) {
     val activeDog: Dog? get() = dogs.find { it.id == activeDogId }
 
-    /** Le collier du chien sélectionné est utilisable (compte Tractive connecté). */
-    val connected get() = tractive != null && activeDog?.hasCollar == true
+    /** Le collier Tractive du chien sélectionné est utilisable (mode LIVE, trace sur une période). */
+    val connected get() = tractive != null && activeDog?.trackerId != null
     val dogName get() = activeDog?.name ?: "Mon chien"
+
+    /** Le chien sélectionné porte un collier dont le compte est connecté (Tractive ou Weenect). */
+    val collarReady get() = collarSourceOf(activeDog) != null
+
+    /** Source réelle de la trace pour [dog] : son collier, si le compte de la marque est connecté. */
+    fun collarSourceOf(dog: Dog?): TrackSource? = when {
+        dog == null -> null
+        dog.trackerId != null && tractive != null -> TrackSource.TRACTIVE
+        dog.weenectTrackerId != null && weenect != null -> TrackSource.WEENECT
+        else -> null
+    }
 
     /** Collier de [dogId], si le compte Tractive est connecté. */
     fun trackerOf(dogId: String?): String? = tractive?.let { dogs.find { it.id == dogId }?.trackerId }
+
+    /** Traceur Weenect de [dogId], si le compte Weenect est connecté. */
+    fun weenectTrackerOf(dogId: String?): String? = weenect?.let { dogs.find { it.id == dogId }?.weenectTrackerId }
 }
 
 /** Code d'invitation créé pour une équipe, à transmettre. */
@@ -175,6 +207,9 @@ data class CloudState(
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = SessionStore(app)
     private val api = TractiveApi()
+    private val weenectApi = WeenectApi()
+    /** Renouvellement du super live Weenect pendant une recherche. */
+    private var weenectLive: Job? = null
     private val weatherApi = WeatherApi()
     private val repository = AppStorage.sessions(app)
     private val trailRepository = AppStorage.trails(app)
@@ -187,6 +222,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             val tractive = store.tractive.first()
+            val weenect = store.weenect.first()
             val dogs = store.dogs.first()
             val activeDogId = store.activeDogId.first()?.takeIf { id -> dogs.any { it.id == id } } ?: dogs.firstOrNull()?.id
             val recording = store.activeRecording.first()
@@ -194,7 +230,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val trails = withContext(Dispatchers.IO) { trailRepository.list() }
             _state.update {
                 it.copy(
-                    ready = true, tractive = tractive, dogs = dogs, activeDogId = activeDogId, trackSource = store.trackSource.first(),
+                    ready = true, tractive = tractive, weenect = weenect, dogs = dogs, activeDogId = activeDogId, trackSource = store.trackSource.first(),
                     recording = recording, sessions = sessions, trails = trails,
                     quickNotes = store.quickNotes.first(), lastSpaceId = store.lastSpaceId.first(),
                     recordingNotes = if (recording != null) withContext(Dispatchers.IO) { notesBuffer.read() } else emptyList(),
@@ -203,6 +239,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // Enregistre la liste (migration du chien unique d'avant) ; compte connecté sans chien lié : import.
             store.saveDogs(dogs, activeDogId)
             if (tractive != null && dogs.none { it.tractivePetId != null }) syncTractiveDogs()
+            if (weenect != null && dogs.none { it.weenectTrackerId != null }) syncWeenectDogs()
+            // Appli relancée pendant une recherche au collier Weenect : le super live est entretenu.
+            if (recording?.source == TrackSource.WEENECT) keepWeenectLive(recording)
             // Appli relancée pendant un enregistrement au GPS du téléphone : on le reprend.
             if (recording?.source == TrackSource.PHONE && !PhoneRecordingService.running.value &&
                 PhoneRecordingService.hasLocationPermission(getApplication())
@@ -528,6 +567,42 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Connexion au compte Weenect : ses traceurs deviennent des chiens (ou sont liés aux chiens de même nom). */
+    fun loginWeenect(email: String, password: String) = run {
+        val session = weenectApi.login(email.trim(), password)
+        store.saveWeenect(session)
+        _state.update { it.copy(weenect = session) }
+        fetchWeenectDogs()
+    }
+
+    fun logoutWeenect() {
+        viewModelScope.launch {
+            store.saveWeenect(null)
+            _state.update { it.copy(weenect = null) }
+        }
+    }
+
+    /** Importe (ou met à jour) les chiens du compte Weenect. */
+    fun syncWeenectDogs() = run { fetchWeenectDogs() }
+
+    private suspend fun fetchWeenectDogs() {
+        val session = _state.value.weenect ?: return
+        val trackers = weenectApi.trackers(session)
+        val s = _state.value
+        val merged = mergeWeenectTrackers(s.dogs, trackers, store.ignoredPetIds.first())
+        val active = s.activeDogId?.takeIf { id -> merged.any { it.id == id } }
+            ?: (merged.firstOrNull { it.hasCollar } ?: merged.firstOrNull())?.id
+        saveDogs(merged, active)
+        _state.update {
+            it.copy(
+                message = when {
+                    trackers.isEmpty() -> "Aucun traceur trouvé sur ce compte Weenect."
+                    else -> "Chiens Weenect à jour : ${trackers.joinToString { t -> t.name }}."
+                },
+            )
+        }
+    }
+
     private suspend fun saveDogs(dogs: List<Dog>, activeDogId: String?) {
         val before = _state.value.dogs
         val stamped = stampChangedDogs(before, dogs, System.currentTimeMillis())
@@ -568,6 +643,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (s.recording?.dogId == dog.id) return@launch
             // Animal Tractive retiré (le chat de la maison…) : pas réimporté à la prochaine synchronisation.
             dog.tractivePetId?.let { store.saveIgnoredPetIds(store.ignoredPetIds.first() + it) }
+            dog.weenectTrackerId?.let { store.saveIgnoredPetIds(store.ignoredPetIds.first() + weenectIgnoreKey(it)) }
             recordDeletion(SyncKind.DOG, dog.id, dog.spaceId)
             val remaining = s.dogs.filter { it.id != dog.id }
             saveDogs(remaining, s.activeDogId?.takeIf { it != dog.id } ?: remaining.firstOrNull()?.id)
@@ -646,11 +722,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(trackSource = source) }
         }
         val s = _state.value
+        // « Collier » choisi : celui que porte le chien, Tractive ou Weenect.
+        val actual = if (source.isCollar) {
+            s.collarSourceOf(s.activeDog) ?: error("${s.dogName} n'a pas de collier connecté : connecte son compte dans les paramètres.")
+        } else {
+            source
+        }
         val recording = ActiveRecording(
-            UUID.randomUUID().toString(), s.dogName, source, Instant.now().epochSecond, RecordingKind.SEARCH, trailId, s.activeDog?.id, spaceId,
+            UUID.randomUUID().toString(), s.dogName, actual, Instant.now().epochSecond, RecordingKind.SEARCH, trailId, s.activeDog?.id, spaceId,
         )
         var message: String? = null
-        when (source) {
+        when (actual) {
             TrackSource.PHONE -> {
                 withContext(Dispatchers.IO) { PhoneRecordingService.bufferOf(getApplication()).clear() }
                 PhoneRecordingService.start(getApplication())
@@ -668,7 +750,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     "Recherche démarrée, mais le mode LIVE n'a pas pu être activé : active-le dans l'appli Tractive."
                 }
             }
+            TrackSource.WEENECT -> {
+                val session = s.weenect ?: error("Connecte d'abord le compte Weenect dans les paramètres.")
+                val tracker = s.activeDog?.weenectTrackerId ?: error("${s.dogName} n'a pas de traceur Weenect associé.")
+                message = try {
+                    weenectApi.superLive(session, tracker)
+                    "Recherche démarrée, super live demandé au traceur Weenect."
+                } catch (e: WeenectAuthException) {
+                    throw e
+                } catch (e: Exception) {
+                    "Recherche démarrée, mais le super live n'a pas pu être activé : active-le dans l'appli Weenect."
+                }
+            }
+            TrackSource.GPX -> error("Une trace GPX s'importe depuis le menu, elle ne s'enregistre pas.")
         }
+        if (actual == TrackSource.WEENECT) keepWeenectLive(recording)
         withContext(Dispatchers.IO) { notesBuffer.clear() }
         store.saveActiveRecording(recording)
         store.saveLastSpaceId(recording.spaceId)
@@ -788,10 +884,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (points.isEmpty()) message = "Aucune position GPS enregistrée : signal trop faible ?"
                 listOf(points).filter { it.isNotEmpty() }
             }
-            TrackSource.TRACTIVE -> fetchCollarTrack(recording.dogId, recording.startedAt, endedAt).also { segs ->
+            TrackSource.TRACTIVE, TrackSource.WEENECT -> fetchCollarTrack(recording.source, recording.dogId, recording.startedAt, endedAt).also { segs ->
                 if (segs.isEmpty()) message = "Trace du collier pas encore disponible : rouvre la recherche un peu plus tard depuis « Mes pistes »."
-                stopLiveQuietly(recording.dogId)
+                if (recording.source == TrackSource.TRACTIVE) stopLiveQuietly(recording.dogId)
+                weenectLive?.cancel()
             }
+            TrackSource.GPX -> emptyList()
         }
         val trail = recording.trailId?.let { id ->
             _state.value.trails.find { it.id == id } ?: withContext(Dispatchers.IO) { trailRepository.load(id) }
@@ -822,16 +920,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Positions du collier de [dogId] pendant la recherche (avec une marge d'une minute). Vide en cas d'échec réseau. */
-    private suspend fun fetchCollarTrack(dogId: String?, startedAt: Long, endedAt: Long): List<List<Position>> {
+    private suspend fun fetchCollarTrack(source: TrackSource, dogId: String?, startedAt: Long, endedAt: Long): List<List<Position>> {
         val s = _state.value
-        val session = s.tractive ?: return emptyList()
-        val tracker = s.trackerOf(dogId) ?: return emptyList()
+        val from = Instant.ofEpochSecond(startedAt - 60)
+        val to = Instant.ofEpochSecond(endedAt + 60)
         return try {
-            api.positions(session, tracker, Instant.ofEpochSecond(startedAt - 60), Instant.ofEpochSecond(endedAt + 60))
+            when (source) {
+                TrackSource.TRACTIVE -> {
+                    val session = s.tractive ?: return emptyList()
+                    val tracker = s.trackerOf(dogId) ?: return emptyList()
+                    api.positions(session, tracker, from, to)
+                }
+                TrackSource.WEENECT -> {
+                    val session = s.weenect ?: return emptyList()
+                    val tracker = s.weenectTrackerOf(dogId) ?: return emptyList()
+                    listOf(weenectApi.positions(session, tracker, from, to)).filter { it.isNotEmpty() }
+                }
+                else -> emptyList()
+            }
         } catch (e: TractiveAuthException) {
+            throw e
+        } catch (e: WeenectAuthException) {
             throw e
         } catch (e: Exception) {
             emptyList()
+        }
+    }
+
+    /**
+     * Le super live Weenect s'arrête seul après quelques minutes : il est redemandé toutes les 4 minutes
+     * tant que la recherche dure (appli ouverte ou en arrière-plan).
+     */
+    private fun keepWeenectLive(recording: ActiveRecording) {
+        weenectLive?.cancel()
+        weenectLive = viewModelScope.launch {
+            while (true) {
+                delay(WEENECT_LIVE_RENEW_MS)
+                val s = _state.value
+                if (s.recording?.id != recording.id) break
+                val session = s.weenect ?: break
+                val tracker = s.weenectTrackerOf(recording.dogId) ?: break
+                runCatching { weenectApi.superLive(session, tracker) }
+            }
         }
     }
 
@@ -851,8 +981,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         fetchSessionWeather(session)
         // Recherche au collier enregistrée avant que Tractive ait transmis les positions : nouvel essai.
         val dogId = session.dogId ?: _state.value.dogs.find { it.name == session.dogName }?.id
-        if (session.source == TrackSource.TRACTIVE && session.segments.isEmpty() && _state.value.trackerOf(dogId) != null) {
-            val segments = fetchCollarTrack(dogId, session.startedAt, session.endedAt)
+        val collarKnown = when (session.source) {
+            TrackSource.TRACTIVE -> _state.value.trackerOf(dogId) != null
+            TrackSource.WEENECT -> _state.value.weenectTrackerOf(dogId) != null
+            else -> false
+        }
+        if (collarKnown && session.segments.isEmpty()) {
+            val segments = fetchCollarTrack(session.source, dogId, session.startedAt, session.endedAt)
             if (segments.isEmpty()) {
                 _state.update { it.copy(message = "Le collier n'a toujours pas transmis de positions pour cette recherche.") }
             } else {
@@ -935,6 +1070,62 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeSession() = _state.update { it.clearedDisplay() }
+
+    // ---------- Import d'un fichier GPX (Garmin, autre appareil ou appli) ----------
+
+    /** Lit le fichier choisi ; on demande ensuite si c'est une piste posée ou la trace d'un chien. */
+    fun importGpx(uri: Uri) = run {
+        val app = getApplication<Application>()
+        val track = withContext(Dispatchers.IO) {
+            app.contentResolver.openInputStream(uri)?.use { Gpx.parse(it) } ?: throw GpxException("Fichier illisible.")
+        }
+        _state.update { it.copy(gpxImport = track) }
+    }
+
+    fun cancelGpxImport() = _state.update { it.copy(gpxImport = null) }
+
+    /** Heure de départ du fichier ; sans heures dans le fichier, la trace est datée de maintenant. */
+    private fun datedImport(track: GpxTrack): Pair<GpxTrack, String?> =
+        if (track.hasTimes) track to null
+        else track.startingAt(Instant.now().epochSecond) to "Le fichier ne donne pas l'heure des points : la trace est datée de l'import."
+
+    /** Le fichier est le parcours du traceur : nouvelle piste posée. */
+    fun importGpxAsTrail() = run {
+        val (track, note) = datedImport(_state.value.gpxImport ?: return@run)
+        val points = track.points
+        val trail = LaidTrail(
+            UUID.randomUUID().toString(), track.startedAt!!, track.endedAt!!, points,
+            updatedAt = System.currentTimeMillis(), spaceId = null,
+        )
+        withContext(Dispatchers.IO) { trailRepository.save(trail) }
+        syncChanges()
+        _state.update {
+            it.copy(gpxImport = null, trails = listOf(trail) + it.trails, message = note ?: "Piste importée.")
+        }
+        showTrail(trail)
+        fetchTrailWeather(trail)
+    }
+
+    /** Le fichier est la trace de [dogId] ; [trailId] : piste posée qu'il suivait. */
+    fun importGpxAsSearch(dogId: String?, trailId: String?) = run {
+        val (track, note) = datedImport(_state.value.gpxImport ?: return@run)
+        val s = _state.value
+        val dog = s.dogs.find { it.id == dogId }
+        val trail = trailId?.let { id -> s.trails.find { it.id == id } }?.let { fullTrail(it) }
+        val session = TrailSession(
+            UUID.randomUUID().toString(), dog?.name ?: s.dogName, TrackSource.GPX, track.startedAt!!, track.endedAt!!, track.segments,
+            trailId = trail?.id, trail = trail?.points.orEmpty(), trailEndedAt = trail?.endedAt,
+            dogId = dog?.id, updatedAt = System.currentTimeMillis(), spaceId = trail?.spaceId ?: dog?.spaceId,
+            trailNotes = trail?.notes.orEmpty(), trailWeather = trail?.weather,
+        )
+        withContext(Dispatchers.IO) { repository.save(session) }
+        syncChanges()
+        _state.update {
+            it.copy(gpxImport = null, sessions = listOf(session) + it.sessions, message = note ?: "Trace de ${session.dogName} importée.")
+        }
+        showSession(session)
+        fetchSessionWeather(session)
+    }
 
     // ---------- Rapport PDF de la recherche ou de la piste affichée ----------
 
@@ -1026,6 +1217,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(
                         tractive = null,
                         message = if (wasLoggedIn) "Session Tractive expirée, reconnecte-toi dans les paramètres." else "Email ou mot de passe incorrect.",
+                    )
+                }
+            } catch (e: WeenectAuthException) {
+                val wasLoggedIn = _state.value.weenect != null
+                store.saveWeenect(null)
+                _state.update {
+                    it.copy(
+                        weenect = null,
+                        message = if (wasLoggedIn) "Session Weenect expirée, reconnecte-toi dans les paramètres." else "Email ou mot de passe Weenect incorrect.",
                     )
                 }
             } catch (e: Exception) {

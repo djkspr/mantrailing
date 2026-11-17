@@ -1,6 +1,7 @@
 package app.mantrailing.session
 
 import app.mantrailing.tractive.Pet
+import app.mantrailing.weenect.WeenectTracker
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -61,5 +62,30 @@ class DogTest {
             session("d", "Rex", "d3"), // un autre chien nommé Rex
         )
         assertEquals(listOf("a", "b"), sessionsOf(sessions, rex).map { it.id })
+    }
+
+    @Test
+    fun `traceurs Weenect - nouveau chien, chien du meme nom lie, traceur retire ignore`() {
+        val rex = Dog("d1", "Rex")
+        val gaia = Dog("tractive-p2", "Gaïa", "p2", "TRK2")
+        val trackers = listOf(WeenectTracker("100", "rex"), WeenectTracker("200", "Nala"), WeenectTracker("300", "Chat"), WeenectTracker("400", "Gaïa"))
+
+        val merged = mergeWeenectTrackers(listOf(rex, gaia), trackers, setOf(weenectIgnoreKey("300")))
+
+        assertEquals(Dog("d1", "Rex", weenectTrackerId = "100"), merged[0])
+        // Un chien Tractive de même nom reçoit aussi son traceur Weenect (il en change, ou porte les deux).
+        assertEquals("400", merged[1].weenectTrackerId)
+        assertEquals(Dog(weenectDogId("200"), "Nala", weenectTrackerId = "200"), merged[2])
+        assertEquals(3, merged.size)
+        // Relancé : rien ne change.
+        assertEquals(merged, mergeWeenectTrackers(merged, trackers, setOf(weenectIgnoreKey("300"))))
+    }
+
+    @Test
+    fun `marque du collier`() {
+        assertEquals("Tractive", Dog("a", "A", "p", "T").collarBrand)
+        assertEquals("Weenect", Dog("b", "B", weenectTrackerId = "1").collarBrand)
+        assertEquals(null, Dog("c", "C").collarBrand)
+        assertTrue(Dog("b", "B", weenectTrackerId = "1").hasCollar)
     }
 }

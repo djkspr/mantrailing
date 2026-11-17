@@ -93,6 +93,8 @@ data class TrackActions(
     val onCloseSession: () -> Unit = {},
     /** Rapport PDF de la recherche ou de la piste affichée. */
     val onExportPdf: () -> Unit = {},
+    /** Choisir un fichier GPX à importer (Garmin, autre appareil ou appli). */
+    val onImportGpx: () -> Unit = {},
     val onAddNote: (NoteType, String?) -> Unit = { _, _ -> },
     val onUndoNote: () -> Unit = {},
     val onUpdateNote: (SearchNote) -> Unit = {},
@@ -145,6 +147,9 @@ fun TrackScreen(
                     TextButton(onClick = { menuOpen = true }, modifier = Modifier.semantics { contentDescription = "Menu" }) { Text("⋮") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(text = { Text("Mes pistes") }, onClick = { menuOpen = false; actions.onOpenSessions() })
+                        if (state.recording == null && !state.demo) {
+                            DropdownMenuItem(text = { Text("Importer un fichier GPX") }, onClick = { menuOpen = false; actions.onImportGpx() })
+                        }
                         if (state.connected && !state.demo) {
                             DropdownMenuItem(
                                 text = { Text(if (showPeriod) "Masquer la recherche par période" else "Trace du collier sur une période") },
@@ -334,6 +339,7 @@ private fun RecordingBanner(state: UiState, onStop: () -> Unit) {
                     laying && state.recordingPoints == 0 -> "En attente du GPS du téléphone…"
                     laying -> "Parcours du traceur au GPS du téléphone · ${state.recordingPoints} positions"
                     recording.source == TrackSource.PHONE -> "GPS du téléphone · ${state.recordingPoints} positions"
+                    recording.source == TrackSource.WEENECT -> "Collier Weenect (super live) · trace récupérée à l'arrivée"
                     else -> "Collier Tractive (mode LIVE) · trace récupérée à l'arrivée"
                 },
                 style = MaterialTheme.typography.bodyMedium,
@@ -358,18 +364,19 @@ private fun RecordingBanner(state: UiState, onStop: () -> Unit) {
 
 /** Première recherche avec un collier connecté : on propose le collier, le choix est gardé. */
 @Composable
-fun SourceChoiceDialog(onChoose: (TrackSource) -> Unit, onDismiss: () -> Unit) {
+fun SourceChoiceDialog(onChoose: (TrackSource) -> Unit, onDismiss: () -> Unit, brand: String = "Tractive") {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Trace du chien") },
         text = {
             Text(
-                "Le collier Tractive du chien donne la trace la plus fidèle : le mode LIVE sera activé pendant la recherche. " +
+                "Le collier $brand du chien donne la trace la plus fidèle : " +
+                    (if (brand == "Weenect") "le super live sera activé pendant la recherche. " else "le mode LIVE sera activé pendant la recherche. ") +
                     "Sinon, la trace est prise par le GPS de ce téléphone, porté par le maître-chien.\n\n" +
                     "Ce choix sera gardé pour les prochaines recherches ; il se change dans les paramètres.",
             )
         },
-        confirmButton = { Button(onClick = { onChoose(TrackSource.TRACTIVE) }) { Text("Collier Tractive") } },
+        confirmButton = { Button(onClick = { onChoose(TrackSource.TRACTIVE) }) { Text("Collier $brand") } },
         dismissButton = { TextButton(onClick = { onChoose(TrackSource.PHONE) }) { Text("GPS du téléphone") } },
     )
 }
@@ -425,7 +432,9 @@ private fun TrailPanel(trail: LaidTrail) {
 
 fun sourceLabel(source: TrackSource) = when (source) {
     TrackSource.TRACTIVE -> "collier Tractive"
+    TrackSource.WEENECT -> "collier Weenect"
     TrackSource.PHONE -> "GPS du téléphone"
+    TrackSource.GPX -> "fichier GPX"
 }
 
 private val SESSION_DATE_FORMAT = DateTimeFormatter.ofPattern("EEE d MMM 'à' HH:mm", Locale.FRENCH)

@@ -43,7 +43,7 @@ import androidx.compose.ui.semantics.semantics
 import app.mantrailing.session.Dog
 import app.mantrailing.sync.Team
 
-fun dogDetail(dog: Dog) = if (dog.hasCollar) "Porte un collier Tractive" else "Sans collier : trace au GPS du téléphone"
+fun dogDetail(dog: Dog) = dog.collarBrand?.let { "Porte un collier $it" } ?: "Sans collier : trace au GPS du téléphone"
 
 /** Paramètres : les chiens de l'équipe, celui qui cherche est coché. */
 @Composable
