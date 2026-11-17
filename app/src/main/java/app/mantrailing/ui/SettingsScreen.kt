@@ -73,6 +73,8 @@ data class SettingsActions(
     val onTrackSource: (TrackSource) -> Unit = {},
     val onQuickNotes: (List<NoteType>) -> Unit = {},
     val cloud: CloudActions = CloudActions(),
+    /** Revoir le tour guidé du premier lancement. */
+    val onReplayTour: () -> Unit = {},
 )
 
 /** Rubriques des paramètres : chacune a sa page, le menu les résume en une ligne. */
@@ -158,7 +160,7 @@ fun SettingsScreen(state: UiState, actions: SettingsActions, initialPage: Settin
                 TeamsSetting(state.cloud, actions.cloud)
             }
             SettingsPage.NOTES -> QuickNotesSetting(state.quickNotes, actions.onQuickNotes)
-            SettingsPage.ABOUT -> AboutSetting()
+            SettingsPage.ABOUT -> AboutSetting(actions.onReplayTour)
         }
     }
 }
@@ -246,10 +248,11 @@ private fun CollarsSetting(state: UiState, actions: SettingsActions) {
 }
 
 @Composable
-private fun AboutSetting() {
+private fun AboutSetting(onReplayTour: () -> Unit) {
     val uriHandler = LocalUriHandler.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Mantrailing ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.titleMedium)
+        TextButton(onClick = onReplayTour, modifier = Modifier.testTag("replay-tour")) { Text("Revoir le tour guidé") }
         TextButton(onClick = { uriHandler.openUri(PRIVACY_POLICY_URL) }) { Text("Politique de confidentialité") }
         Text(
             "Application indépendante, ni affiliée à Tractive ni à Weenect, ni approuvée par eux.",

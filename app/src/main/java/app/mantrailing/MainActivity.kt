@@ -208,6 +208,7 @@ private fun App(
                 state,
                 SettingsActions(
                     onBack = { screen = Screen.HOME },
+                    onReplayTour = { vm.replayTour(); screen = Screen.HOME },
                     onLogin = vm::login,
                     onSyncDogs = vm::syncTractiveDogs,
                     onAddDog = vm::addDog,
@@ -278,6 +279,7 @@ private fun App(
                 onOpenSessions = { screen = Screen.SESSIONS },
                 onCloseSession = vm::closeSession,
                 onExportPdf = vm::exportPdf,
+                onFinishTour = vm::finishTour,
                 // Le type MIME d'un .gpx varie selon l'appli qui l'a enregistré : tous les fichiers sont proposés.
                 onImportGpx = { gpxPicker.launch(arrayOf("*/*")) },
                 onAddNote = vm::addNote,

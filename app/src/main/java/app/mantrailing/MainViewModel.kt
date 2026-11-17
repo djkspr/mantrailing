@@ -103,6 +103,8 @@ data class UiState(
     val tractive: Session? = null,
     /** Compte Weenect connecté. */
     val weenect: WeenectSession? = null,
+    /** Tour guidé affiché sur l'accueil (premier lancement, ou revu depuis les paramètres). */
+    val showTour: Boolean = false,
     /** Fichier GPX lu, en attente : piste posée ou trace d'un chien ? */
     val gpxImport: GpxTrack? = null,
     /** Chiens de l'équipe. */
@@ -234,6 +236,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     recording = recording, sessions = sessions, trails = trails,
                     quickNotes = store.quickNotes.first(), lastSpaceId = store.lastSpaceId.first(),
                     recordingNotes = if (recording != null) withContext(Dispatchers.IO) { notesBuffer.read() } else emptyList(),
+                    showTour = !store.tourDone.first() && recording == null,
                 )
             }
             // Enregistre la liste (migration du chien unique d'avant) ; compte connecté sans chien lié : import.
@@ -1197,6 +1200,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(tractive = null, segments = emptyList(), stats = null, openedSession = null, loadedOnce = false) }
         }
     }
+
+    /** Tour guidé terminé ou passé : plus montré au lancement. */
+    fun finishTour() {
+        _state.update { it.copy(showTour = false) }
+        viewModelScope.launch { store.saveTourDone(true) }
+    }
+
+    /** Revoir le tour guidé (paramètres, aide) : sur l'accueil, carte vierge. */
+    fun replayTour() = _state.update { it.clearedDisplay().copy(showTour = true) }
 
     fun dismissMessage() = _state.update { it.copy(message = null) }
 

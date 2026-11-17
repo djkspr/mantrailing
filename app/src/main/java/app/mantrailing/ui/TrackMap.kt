@@ -322,7 +322,7 @@ fun TrackMap(
             },
             enabled = !locating,
             // Au-dessus de l'attribution des fonds de carte, en bas à droite.
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 36.dp).testTag("locate-me"),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 36.dp).testTag("locate-me").tourTarget(TourTarget.LOCATE),
         ) {
             if (locating) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             else Text("◎ Me localiser")
