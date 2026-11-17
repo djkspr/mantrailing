@@ -242,6 +242,7 @@ private fun App(
                     onMoveDog = vm::moveDog,
                     onDogProgress = { dog -> openProgress(dog.id, Screen.SETTINGS) },
                     onLogout = vm::logout,
+                    onDeleteOfflineZone = vm::deleteOfflineZone,
                     onWeenectLogin = vm::loginWeenect,
                     onWeenectLogout = vm::logoutWeenect,
                     onSyncWeenect = vm::syncWeenectDogs,
@@ -313,6 +314,8 @@ private fun App(
                 onExportPdf = vm::exportPdf,
                 onExportGpx = vm::exportGpx,
                 onOpenLog = vm::openLogEditor,
+                onDownloadArea = vm::downloadOfflineArea,
+                onCancelDownload = vm::cancelOfflineDownload,
                 onFinishTour = vm::finishTour,
                 // Le type MIME d'un .gpx varie selon l'appli qui l'a enregistré : tous les fichiers sont proposés.
                 onImportGpx = { gpxPicker.launch(arrayOf("*/*")) },
