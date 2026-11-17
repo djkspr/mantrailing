@@ -35,13 +35,19 @@ if ($LASTEXITCODE -ne 0) { throw "Tests des outils en échec : rien n'est à env
 if ($LASTEXITCODE -ne 0) { throw "Échec (code $LASTEXITCODE) : rien n'est à envoyer." }
 
 if (-not $SkipDeviceTests) {
-    # Une version signée différemment (release) déjà installée empêcherait l'installation des tests.
     $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
-    & $adb uninstall app.mantrailing 2>&1 | Out-Null
+    # Tests d'interface sur l'ÉMULATEUR seulement : la désinstallation ci-dessous viderait l'appli d'un vrai téléphone
+    # branché en USB (pistes, recherches, chiens). ANDROID_SERIAL limite aussi Gradle à cet appareil.
+    $emulator = & $adb devices | Select-String '^(emulator-\d+)\s+device' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -First 1
+    if (-not $emulator) { throw "Aucun émulateur démarré : lance-le (tests d'interface jamais sur un téléphone branché), ou -SkipDeviceTests." }
+    $env:ANDROID_SERIAL = $emulator
+    Write-Host "Tests d'interface sur $emulator"
+    # Une version signée différemment (release) déjà installée empêcherait l'installation des tests.
+    & $adb -s $emulator uninstall app.mantrailing 2>&1 | Out-Null
     # Écran allumé pendant les tests : en veille, les tests d'interface échouent tous.
-    & $adb shell svc power stayon true
-    & $adb shell input keyevent 224
-    & $adb shell wm dismiss-keyguard
+    & $adb -s $emulator shell svc power stayon true
+    & $adb -s $emulator shell input keyevent 224
+    & $adb -s $emulator shell wm dismiss-keyguard
     $results = 'app\build\outputs\androidTest-results\connected'
     foreach ($attempt in 1, 2) {
         & .\gradlew.bat connectedDebugAndroidTest --console=plain
