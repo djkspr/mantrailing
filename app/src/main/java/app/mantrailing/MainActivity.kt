@@ -211,8 +211,7 @@ private fun App(
         !state.ready -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         screen == Screen.HELP -> {
             BackHandler { screen = helpFrom }
-            // TODO tour : onReplayTour = { vm.replayTour(); screen = Screen.HOME } quand le tour guidé sera fusionné.
-            HelpScreen(onBack = { screen = helpFrom })
+            HelpScreen(onBack = { screen = helpFrom }, onReplayTour = { vm.replayTour(); screen = Screen.HOME })
         }
         screen == Screen.SETTINGS -> {
             BackHandler { screen = Screen.HOME }
@@ -220,6 +219,7 @@ private fun App(
                 state,
                 SettingsActions(
                     onBack = { screen = Screen.HOME },
+                    onReplayTour = { vm.replayTour(); screen = Screen.HOME },
                     onLogin = vm::login,
                     onSyncDogs = vm::syncTractiveDogs,
                     onAddDog = vm::addDog,
@@ -293,6 +293,7 @@ private fun App(
                 onCloseSession = vm::closeSession,
                 onExportPdf = vm::exportPdf,
                 onExportGpx = vm::exportGpx,
+                onFinishTour = vm::finishTour,
                 // Le type MIME d'un .gpx varie selon l'appli qui l'a enregistré : tous les fichiers sont proposés.
                 onImportGpx = { gpxPicker.launch(arrayOf("*/*")) },
                 onAddNote = vm::addNote,

@@ -28,6 +28,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -105,6 +106,8 @@ data class TrackActions(
     val onDeleteNote: (SearchNote) -> Unit = {},
     /** Précision ajoutée à la dernière note posée (danger, point d'attention du traceur). */
     val onCommentLastNote: (String) -> Unit = {},
+    /** Tour guidé terminé ou passé : il ne sera plus montré au lancement. */
+    val onFinishTour: () -> Unit = {},
 )
 
 /** Écran d'accueil : la carte, la pose d'une piste, la recherche en cours, ou une piste / recherche enregistrée. */
@@ -136,19 +139,24 @@ fun TrackScreen(
     // Accueil sans rien d'ouvert : le titre permet de choisir le chien qui va chercher.
     val choosingDog = state.dogs.isNotEmpty() && !state.demo && state.recording == null &&
         state.openedSession == null && state.openedTrail == null
+    // Tour guidé du premier lancement : jamais pendant un enregistrement ni dans la démo.
+    val touring = state.showTour && state.recording == null && !state.demo
+    val tourRegistry = remember { TourRegistry() }
+    CompositionLocalProvider(LocalTourRegistry provides tourRegistry.takeIf { touring }) {
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (choosingDog) {
-                    DogPicker(state.dogs, state.activeDog, actions.onSelectDog, actions.onOpenSettings, Modifier.weight(1f))
+                    DogPicker(state.dogs, state.activeDog, actions.onSelectDog, actions.onOpenSettings, Modifier.weight(1f).tourTarget(TourTarget.TITLE))
                 } else {
-                    Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).tourTarget(TourTarget.TITLE))
                 }
                 if (state.connected && !state.demo && state.recording == null) {
                     OutlinedButton(onClick = { actions.onLive(true) }, enabled = !state.busy) { Text("Activer LIVE") }
                 }
                 Box {
-                    TextButton(onClick = { menuOpen = true }, modifier = Modifier.semantics { contentDescription = "Menu" }) { Text("⋮") }
+                    TextButton(onClick = { menuOpen = true }, modifier = Modifier.tourTarget(TourTarget.MENU).semantics { contentDescription = "Menu" }) { Text("⋮") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(text = { Text("Mes pistes") }, onClick = { menuOpen = false; actions.onOpenSessions() })
                         if (state.recording == null && !state.demo) {
@@ -222,11 +230,11 @@ fun TrackScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = actions.onLayTrail, enabled = !state.busy,
-                            modifier = Modifier.weight(1f).testTag("lay"),
+                            modifier = Modifier.weight(1f).testTag("lay").tourTarget(TourTarget.LAY),
                         ) { Text("Poser une piste") }
                         Button(
                             onClick = actions.onStartRecording, enabled = !state.busy,
-                            modifier = Modifier.weight(1f).testTag("record"),
+                            modifier = Modifier.weight(1f).testTag("record").tourTarget(TourTarget.RECORD),
                         ) { Text("Démarrer une recherche") }
                     }
                     if (state.connected && showPeriod) {
@@ -253,7 +261,7 @@ fun TrackScreen(
                 onNoteClick = { note -> if (state.trailNotes.any { it.id == note.id }) trailNoteId = note.id else editedNoteId = note.id },
             )
             val idle = !state.demo && state.recording == null && state.openedSession == null && state.openedTrail == null && state.segments.isEmpty()
-            if (state.tractive == null && state.dogs.isEmpty() && idle) Welcome(actions, Modifier.align(Alignment.Center))
+            if (state.tractive == null && state.dogs.isEmpty() && idle && !touring) Welcome(actions, Modifier.align(Alignment.Center))
             state.message?.let { msg ->
                 Surface(
                     onClick = actions.onDismissMessage,
@@ -268,6 +276,9 @@ fun TrackScreen(
             state.stats != null && state.stats.pointCount > 0 -> StatsPanel(state.stats, deviation, state.notes.size) { showNotesList = true }
             state.openedTrail != null -> TrailPanel(state.openedTrail)
         }
+    }
+    if (touring) GuidedTourOverlay(tourRegistry, actions.onFinishTour)
+    }
     }
     if (askOutcome) {
         OutcomeDialog(onFinish = { askOutcome = false; actions.onStopRecording(it) }, onDismiss = { askOutcome = false })

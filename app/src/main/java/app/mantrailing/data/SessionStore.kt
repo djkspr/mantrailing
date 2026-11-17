@@ -42,6 +42,13 @@ class SessionStore(private val context: Context) {
         Session(userId, token, p[EXPIRES_AT] ?: 0)
     }
 
+    /** Tour guidé du premier lancement déjà vu (ou passé). */
+    val tourDone: Flow<Boolean> = context.dataStore.data.map { p -> p[TOUR_DONE] ?: false }
+
+    suspend fun saveTourDone(done: Boolean) {
+        context.dataStore.edit { it[TOUR_DONE] = done }
+    }
+
     /** Compte Weenect connecté. */
     val weenect: Flow<WeenectSession?> = context.dataStore.data.map { p -> p[WEENECT_TOKEN]?.let(::WeenectSession) }
 
@@ -196,6 +203,7 @@ class SessionStore(private val context: Context) {
         val USER_ID = stringPreferencesKey("user_id")
         val TOKEN = stringPreferencesKey("access_token")
         val WEENECT_TOKEN = stringPreferencesKey("weenect_token")
+        val TOUR_DONE = booleanPreferencesKey("tour_done")
         val EXPIRES_AT = longPreferencesKey("expires_at")
         // Chien Tractive unique, avant les chiens multiples : lu une fois pour la migration.
         val PET_ID = stringPreferencesKey("pet_id")
