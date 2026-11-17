@@ -227,12 +227,12 @@ class SyncEngineTest {
     @Test
     fun `lots d'ecriture Firestore limites en nombre et en taille`() {
         val small = (1..450).map { SyncItem(SyncKind.SESSION, "s$it", 1, json = "x") }
-        assertEquals(listOf(400, 50), FirestoreBackend.chunked(small).map { it.size })
+        assertEquals(listOf(400, 50), ApiBackend.chunked(small).map { it.size })
 
         val big = (1..5).map { SyncItem(SyncKind.SESSION, "b$it", 1, json = "x".repeat(900_000)) }
-        assertEquals(listOf(4, 1), FirestoreBackend.chunked(big).map { it.size })
+        assertEquals(listOf(4, 1), ApiBackend.chunked(big).map { it.size })
         // Un élément seul plus gros que la limite part quand même, dans son propre lot.
         val huge = listOf(SyncItem(SyncKind.SESSION, "h", 1, json = "x".repeat(5_000_000)))
-        assertEquals(listOf(1), FirestoreBackend.chunked(huge).map { it.size })
+        assertEquals(listOf(1), ApiBackend.chunked(huge).map { it.size })
     }
 }

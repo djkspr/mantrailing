@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.mantrailing.session.ActiveRecording
+import app.mantrailing.sync.CloudUser
 import app.mantrailing.sync.Team
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -99,6 +100,26 @@ class SessionStore(private val context: Context) {
         context.dataStore.edit { it[CLOUD_TEAMS] = json.encodeToString(ListSerializer(Team.serializer()), teams) }
     }
 
+    /** Jeton de l'API de sauvegarde (jamais le mot de passe Google : il ne passe pas par l'appli). */
+    val cloudToken: Flow<String?> = context.dataStore.data.map { p -> p[CLOUD_TOKEN] }
+
+    /** Compte de sauvegarde connecté. */
+    val cloudUser: Flow<CloudUser?> = context.dataStore.data.map { p ->
+        p[CLOUD_USER]?.let { runCatching { json.decodeFromString(CloudUser.serializer(), it) }.getOrNull() }
+    }
+
+    suspend fun saveCloudSession(token: String?, user: CloudUser?) {
+        context.dataStore.edit {
+            if (token != null && user != null) {
+                it[CLOUD_TOKEN] = token
+                it[CLOUD_USER] = json.encodeToString(CloudUser.serializer(), user)
+            } else {
+                it.remove(CLOUD_TOKEN)
+                it.remove(CLOUD_USER)
+            }
+        }
+    }
+
     /** Espace choisi pour la dernière piste ou recherche (null : perso), proposé la fois suivante. */
     val lastSpaceId: Flow<String?> = context.dataStore.data.map { p -> p[LAST_SPACE]?.takeIf { it.isNotEmpty() } }
 
@@ -186,6 +207,8 @@ class SessionStore(private val context: Context) {
         val QUICK_NOTES = stringPreferencesKey("quick_notes")
         val SYNC_WIFI_ONLY = booleanPreferencesKey("sync_wifi_only")
         val CLOUD_TEAMS = stringPreferencesKey("cloud_teams")
+        val CLOUD_TOKEN = stringPreferencesKey("cloud_token")
+        val CLOUD_USER = stringPreferencesKey("cloud_user")
         val LAST_SPACE = stringPreferencesKey("last_space_id")
         val KEEP_DAYS = stringPreferencesKey("keep_on_phone_days")
     }

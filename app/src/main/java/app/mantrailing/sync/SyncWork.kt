@@ -125,13 +125,12 @@ object SyncEvents {
 /** Une synchronisation complète : équipes à jour, puis chaque espace (perso et équipes), puis place libérée. */
 object CloudSync {
     suspend fun run(context: Context) {
-        val firestore = CloudConfig.firestore(context) ?: return
-        val uid = CloudAccount.uid(context) ?: return
+        val api = CloudConfig.api(context) ?: return
         val store = SessionStore(context)
 
         // Équipes : nouvelles (rejointes ailleurs avec le même compte), et celles quittées ou dont on a été retiré.
         val known = store.cloudTeams.first()
-        val teams = TeamDirectory(firestore).teamsOf(uid)
+        val teams = api.me().teams
         known.filter { old -> teams.none { it.id == old.id } }.forEach { AppSyncStore.forgetSpace(context, it.id) }
         store.saveCloudTeams(teams)
 
@@ -139,7 +138,7 @@ object CloudSync {
         for (spaceId in listOf<String?>(null) + teams.map { it.id }) {
             val local = AppSyncStore(context, spaceId)
             val journal = AppStorage.syncJournal(context, spaceId)
-            SyncEngine(local, FirestoreBackend.of(firestore, uid, spaceId), journal).sync()
+            SyncEngine(local, api.backend(spaceId), journal).sync()
             if (keepDays != null) local.archiveOld(journal.read(), keepDays)
         }
     }
@@ -149,7 +148,7 @@ object CloudSync {
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val context = applicationContext
-        if (CloudAccount.uid(context) == null) return Result.success()
+        if (CloudConfig.api(context) == null) return Result.success()
         val journal = AppStorage.syncJournal(context, null)
         SyncEvents.started()
         return try {
@@ -157,6 +156,11 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             Result.success()
         } catch (e: CancellationException) {
             throw e
+        } catch (e: CloudUnauthorizedException) {
+            // Jeton refusé (compte supprimé ailleurs, jeton révoqué) : inutile d'insister, il faut se reconnecter.
+            SessionStore(context).saveCloudSession(null, null)
+            journal.update { it.copy(lastError = "Connexion expirée : réactive la sauvegarde en ligne.") }
+            Result.failure()
         } catch (e: Exception) {
             journal.update { it.copy(lastError = e.message ?: e.javaClass.simpleName) }
             if (runAttemptCount < MAX_ATTEMPTS) Result.retry() else Result.failure()

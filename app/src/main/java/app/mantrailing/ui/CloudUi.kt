@@ -39,7 +39,7 @@ import app.mantrailing.CloudState
 import app.mantrailing.Invite
 import app.mantrailing.session.KEEP_ON_PHONE_CHOICES
 import app.mantrailing.sync.Team
-import app.mantrailing.sync.TeamDirectory
+import app.mantrailing.sync.InviteCodes
 
 data class CloudActions(
     val onSignIn: () -> Unit = {},
@@ -177,7 +177,7 @@ private fun TeamsSetting(cloud: CloudState, actions: CloudActions) {
             title = "Rejoindre une équipe", label = "Code reçu", confirm = "Rejoindre", tag = "join-code",
             capitalization = KeyboardCapitalization.Characters,
             help = "Vous verrez ce qui se fait dans l'équipe. Rien de ce que vous avez déjà n'y est envoyé.",
-            isValid = { TeamDirectory.normalizeInviteCode(it).length == 8 },
+            isValid = { InviteCodes.normalize(it).length == 8 },
             onConfirm = { joining = false; actions.onJoin(it) }, onDismiss = { joining = false },
         )
     }
@@ -200,7 +200,7 @@ private fun TeamsSetting(cloud: CloudState, actions: CloudActions) {
 @Composable
 private fun InviteDialog(invite: Invite, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val formatted = TeamDirectory.formatInviteCode(invite.code)
+    val formatted = InviteCodes.format(invite.code)
     val text = "Rejoins l'équipe « ${invite.teamName} » dans l'appli Mantrailing : Paramètres › Équipes › Rejoindre, " +
         "code $formatted (valable 7 jours)."
     AlertDialog(

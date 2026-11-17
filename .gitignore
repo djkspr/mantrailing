@@ -13,6 +13,4 @@ keystore.properties
 release/
 store/*.mp4
 
-# Projet Firebase (clé d'API dedans) : comme keystore.properties, hors du dépôt.
-app/google-services.json
 *-debug.log

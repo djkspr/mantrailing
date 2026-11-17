@@ -1,10 +1,9 @@
 package app.mantrailing.session
 
-import app.mantrailing.sync.TeamDirectory
+import app.mantrailing.sync.InviteCodes
 import app.mantrailing.tractive.Position
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -60,11 +59,7 @@ class ArchiveTest {
 
     @Test
     fun `codes d'invitation lisibles et saisis librement`() {
-        val code = TeamDirectory.newInviteCode()
-        assertEquals(8, code.length)
-        assertTrue(code.none { it in "01OIL" })
-        assertNotEquals(code, TeamDirectory.newInviteCode())
-        assertEquals("ABCD-EFGH", TeamDirectory.formatInviteCode("ABCDEFGH"))
-        assertEquals("ABCDEFGH", TeamDirectory.normalizeInviteCode(" abcd-efgh "))
+        assertEquals("ABCD-EFGH", InviteCodes.format("ABCDEFGH"))
+        assertEquals("ABCDEFGH", InviteCodes.normalize(" abcd-efgh "))
     }
 }

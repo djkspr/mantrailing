@@ -15,11 +15,9 @@ import app.mantrailing.sync.SyncEvents
 import app.mantrailing.sync.SyncKind
 import app.mantrailing.sync.SyncScheduler
 import app.mantrailing.sync.AppSyncStore
-import app.mantrailing.sync.FirestoreBackend
 import app.mantrailing.sync.SyncItem
 import app.mantrailing.session.DEFAULT_KEEP_ON_PHONE_DAYS
 import app.mantrailing.sync.Team
-import app.mantrailing.sync.TeamDirectory
 import app.mantrailing.session.Dog
 import app.mantrailing.session.mergeTractivePets
 import app.mantrailing.tractive.Session
@@ -207,7 +205,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun initCloud() {
         val app = getApplication<Application>()
         val available = CloudConfig.isAvailable
-        val email = if (available) withContext(Dispatchers.IO) { CloudAccount.email(app) } else null
+        val user = if (available) CloudAccount.current(app) else null
+        val email = user?.let { it.email ?: it.name }
         val wifiOnly = store.syncWifiOnly.first()
         _state.update {
             it.copy(
@@ -233,8 +232,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun refreshSyncState() {
         val sync = journalOf(null).read()
-        val teams = if (_state.value.cloud.enabled) store.cloudTeams.first() else emptyList()
-        _state.update { it.copy(cloud = it.cloud.copy(lastSyncAt = sync.lastSyncAt, lastError = sync.lastError, teams = teams)) }
+        // Compte déconnecté par la tâche de fond (jeton refusé) : l'écran le montre.
+        val user = CloudAccount.current(getApplication())
+        val teams = if (user != null) store.cloudTeams.first() else emptyList()
+        _state.update {
+            it.copy(
+                cloud = it.cloud.copy(
+                    email = user?.let { u -> u.email ?: u.name }, lastSyncAt = sync.lastSyncAt, lastError = sync.lastError, teams = teams,
+                ),
+            )
+        }
     }
 
     private suspend fun reloadFromDisk() {
@@ -265,7 +272,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Connexion Google ; [activityContext] affiche le choix du compte. */
     fun signInCloud(activityContext: Context) = cloudAction {
-        val email = CloudAccount.signIn(activityContext)
+        val user = CloudAccount.signIn(activityContext)
+        val email = user.email ?: user.name
         _state.update { it.copy(cloud = it.cloud.copy(email = email, message = "Sauvegarde activée.")) }
         SyncScheduler.enable(getApplication(), _state.value.cloud.wifiOnly)
         refreshTeams()
@@ -274,30 +282,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Équipes du compte, relues au serveur ; données des équipes quittées retirées du téléphone. */
     private suspend fun refreshTeams() {
         val app = getApplication<Application>()
-        val firestore = CloudConfig.firestore(app) ?: return
-        val uid = CloudAccount.uid(app) ?: return
-        val teams = TeamDirectory(firestore).teamsOf(uid)
+        val api = CloudConfig.api(app) ?: return
+        val teams = api.me().teams
         store.cloudTeams.first().filter { old -> teams.none { it.id == old.id } }.forEach { AppSyncStore.forgetSpace(app, it.id) }
         store.saveCloudTeams(teams)
         _state.update { it.copy(cloud = it.cloud.copy(teams = teams)) }
         reloadFromDisk()
     }
 
-    private fun directory() = TeamDirectory(CloudConfig.firestore(getApplication()) ?: error("Sauvegarde en ligne indisponible."))
-    private fun uid() = CloudAccount.uid(getApplication()) ?: error("Active d'abord la sauvegarde en ligne.")
-    private fun displayName() = CloudAccount.displayName(getApplication())
+    private suspend fun api() = CloudConfig.api(getApplication()) ?: error("Active d'abord la sauvegarde en ligne.")
 
     /** Nouvelle équipe (famille, club…), vide : on y met ensuite ce que l'on veut partager. */
     fun createTeam(name: String) = cloudAction {
         val clean = name.trim().takeIf { it.isNotEmpty() } ?: return@cloudAction
-        val team = directory().create(uid(), displayName(), clean)
+        val team = api().createTeam(clean)
         refreshTeams()
         _state.update { it.copy(cloud = it.cloud.copy(message = "Équipe « ${team.name} » créée : invite ses membres.")) }
     }
 
     /** Code à transmettre à un membre de la famille, au traceur… */
     fun createInvite(team: Team) = cloudAction {
-        val code = directory().createInvite(uid(), team.id)
+        val code = api().createInvite(team.id)
         _state.update { it.copy(cloud = it.cloud.copy(invite = Invite(team.name, code))) }
     }
 
@@ -305,7 +310,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Rejoint une équipe : on reçoit ce qui s'y fait, rien de ce que l'on a déjà n'y est envoyé. */
     fun joinTeam(code: String) = cloudAction {
-        val team = directory().join(uid(), displayName(), code)
+        val team = api().join(code)
         refreshTeams()
         _state.update { it.copy(cloud = it.cloud.copy(message = "Tu as rejoint « ${team.name} ».")) }
         SyncScheduler.syncNow(getApplication())
@@ -313,7 +318,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Quitte l'équipe : ses données sont retirées du téléphone (elles restent à l'équipe). */
     fun leaveTeam(team: Team) = cloudAction {
-        directory().leave(uid(), team)
+        api().leave(team.id)
         refreshTeams()
         _state.update { it.copy(cloud = it.cloud.copy(message = "Tu as quitté « ${team.name} ».")) }
     }
@@ -373,10 +378,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Version complète d'un élément qui n'est plus qu'en ligne. */
     private suspend fun download(kind: SyncKind, id: String, spaceId: String?): SyncItem {
         val app = getApplication<Application>()
-        val firestore = CloudConfig.firestore(app) ?: error("Sauvegarde en ligne indisponible.")
-        val uid = CloudAccount.uid(app) ?: error("Reconnecte la sauvegarde en ligne pour l'afficher.")
+        val api = CloudConfig.api(app) ?: error("Reconnecte la sauvegarde en ligne pour l'afficher.")
         return try {
-            FirestoreBackend.of(firestore, uid, spaceId).get(kind, id)
+            api.backend(spaceId).get(kind, id)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

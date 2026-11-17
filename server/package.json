@@ -1,0 +1,24 @@
+{
+  "name": "mantrailing-api",
+  "version": "1.0.0",
+  "description": "Sauvegarde en ligne et équipes de l'appli Mantrailing (o2switch, Node + MySQL)",
+  "private": true,
+  "main": "src/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
+    "db:local": "node scripts/local-db.js"
+  },
+  "dependencies": {
+    "dotenv": "17.2.3",
+    "express": "5.1.0",
+    "express-rate-limit": "8.7.1",
+    "google-auth-library": "10.5.0",
+    "mysql2": "3.16.3",
+    "zod": "4.6.7"
+  }
+}
