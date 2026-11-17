@@ -53,6 +53,10 @@ import app.mantrailing.weenect.WeenectSession
 import app.mantrailing.gpx.Gpx
 import app.mantrailing.gpx.GpxException
 import app.mantrailing.gpx.GpxTrack
+import app.mantrailing.gpx.GpxOutTrack
+import app.mantrailing.gpx.GpxWaypoint
+import app.mantrailing.gpx.writeGpx
+import app.mantrailing.ui.sourceLabel
 import app.mantrailing.session.mergeWeenectTrackers
 import app.mantrailing.session.weenectIgnoreKey
 import app.mantrailing.tractive.TractiveAuthException
@@ -1155,6 +1159,56 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }.getOrNull()
             _state.update { it.copy(exporting = false, message = if (file == null) "Le rapport PDF n'a pas pu être créé." else it.message) }
             file?.let { shareReport(app, it) }
+        }
+    }
+
+    /**
+     * Fichier GPX de la recherche ou de la piste affichée (Garmin, Komoot, Google Earth…) : trace du chien d'abord
+     * (c'est elle que Mantrailing reprend à l'import), puis la piste suivie ; notes et signalements en points nommés.
+     */
+    fun exportGpx() {
+        val s = _state.value
+        if (s.exporting) return
+        val session = s.openedSession
+        val trail = s.openedTrail
+        val (name, tracks, notes) = when {
+            session != null -> Triple(
+                "Recherche de ${session.dogName}",
+                listOf(
+                    GpxOutTrack("Trace de ${session.dogName}", session.segments, sourceLabel(session.source)),
+                    GpxOutTrack("Piste du traceur", listOf(session.trail)),
+                ),
+                session.trailNotes + session.notes,
+            )
+            trail != null -> Triple("Piste posée", listOf(GpxOutTrack("Piste du traceur", listOf(trail.points))), trail.notes)
+            else -> return
+        }
+        if (tracks.all { t -> t.segments.all { it.isEmpty() } }) {
+            _state.update { it.copy(message = "Rien à exporter : la trace n'est pas sur ce téléphone.") }
+            return
+        }
+        val fileName = when {
+            session != null -> sessionReport(session, s.cloud.spaceName(session.spaceId)).fileName
+            else -> trailReport(trail!!, s.cloud.spaceName(trail.spaceId)).fileName
+        }.removeSuffix(".pdf") + ".gpx"
+        val waypoints = notes.sortedBy { it.time }.mapNotNull { n ->
+            val lat = n.lat ?: return@mapNotNull null
+            val lon = n.lon ?: return@mapNotNull null
+            GpxWaypoint(lat, lon, n.time, n.detail, n.type.category.label)
+        }
+        _state.update { it.copy(exporting = true) }
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val file = runCatching {
+                withContext(Dispatchers.IO) {
+                    val dir = reportsDir(app)
+                    dir.deleteRecursively()
+                    dir.mkdirs()
+                    File(dir, fileName).also { f -> f.bufferedWriter().use { writeGpx(it, name, tracks, waypoints) } }
+                }
+            }.getOrNull()
+            _state.update { it.copy(exporting = false, message = if (file == null) "Le fichier GPX n'a pas pu être créé." else it.message) }
+            file?.let { shareReport(app, it, "application/gpx+xml") }
         }
     }
 

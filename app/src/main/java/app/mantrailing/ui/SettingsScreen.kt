@@ -26,6 +26,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import kotlinx.coroutines.delay
@@ -129,19 +130,31 @@ fun SettingsScreen(state: UiState, actions: SettingsActions, initialPage: Settin
             now = System.currentTimeMillis()
         }
     }
-    Column(
-        Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    // Barre de titre fixe (le « ← » reste toujours visible) ; seul le contenu défile, depuis le haut à chaque page.
+    Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+        Row(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(
                 onClick = { if (page != null) page = null else actions.onBack() },
                 modifier = Modifier.semantics { contentDescription = "Retour" },
             ) { Text("←", style = MaterialTheme.typography.headlineSmall) }
             Text(page?.title ?: "Paramètres", style = MaterialTheme.typography.headlineSmall)
         }
+        key(page) {
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                SettingsPageContent(page, state, actions, now) { page = it }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsPageContent(page: SettingsPage?, state: UiState, actions: SettingsActions, now: Long, onOpen: (SettingsPage?) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         when (page) {
-            null -> SettingsMenu(state, now) { page = it }
+            null -> SettingsMenu(state, now) { onOpen(it) }
             SettingsPage.DOGS -> DogsSetting(
                 state.dogs, state.activeDogId, actions.onSelectDog, actions.onAddDog, actions.onRenameDog, actions.onDeleteDog,
                 teams = state.cloud.teams, onMove = actions.onMoveDog,
@@ -153,7 +166,7 @@ fun SettingsScreen(state: UiState, actions: SettingsActions, initialPage: Settin
                     "Les équipes passent par la sauvegarde en ligne : activez-la d'abord pour créer ou rejoindre une équipe.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                OutlinedButton(onClick = { page = SettingsPage.BACKUP }) { Text("Sauvegarde en ligne") }
+                OutlinedButton(onClick = { onOpen(SettingsPage.BACKUP) }) { Text("Sauvegarde en ligne") }
             } else {
                 TeamsSetting(state.cloud, actions.cloud)
             }

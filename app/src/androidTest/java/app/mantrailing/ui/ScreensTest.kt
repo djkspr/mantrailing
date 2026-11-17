@@ -275,18 +275,29 @@ class ScreensTest {
     }
 
     @Test
-    fun rapport_pdf_depuis_une_piste_ou_une_recherche_affichee() {
-        var exports = 0
+    fun exporter_en_pdf_ou_en_gpx_une_piste_affichee() {
+        var pdf = 0
+        var gpx = 0
         val state = mutableStateOf(UiState(ready = true, openedTrail = laidTrail, trailLine = laidTrail.points))
-        rule.setContent { MaterialTheme { TrackScreen(state.value, TrackActions(onExportPdf = { exports++ })) } }
+        rule.setContent { MaterialTheme { TrackScreen(state.value, TrackActions(onExportPdf = { pdf++ }, onExportGpx = { gpx++ })) } }
 
-        rule.onNodeWithText("PDF").performClick()
-        assertEquals(1, exports)
+        rule.onNodeWithTag("export").performClick()
+        rule.onNodeWithText("Rapport PDF").performClick()
+        rule.onNodeWithTag("export").performClick()
+        rule.onNodeWithText("Fichier GPX").performClick()
+        assertEquals(1 to 1, pdf to gpx)
 
-        // Pendant la création : « PDF… », un nouvel appui ne relance rien.
+        // Pendant la création : « Export… », bouton inactif.
         state.value = state.value.copy(exporting = true)
-        rule.onNodeWithText("PDF…").performClick()
-        assertEquals(1, exports)
+        rule.onNodeWithText("Export…").assertIsNotEnabled()
+    }
+
+    @Test
+    fun parametres_barre_de_titre_toujours_visible() {
+        rule.setContent { MaterialTheme { SettingsScreen(connected, SettingsActions(), SettingsPage.COLLARS) } }
+        rule.onNodeWithText("Trace du chien").performScrollTo()
+        rule.onNodeWithContentDescription("Retour").assertIsDisplayed()
+        rule.onNodeWithText("Colliers GPS").assertIsDisplayed()
     }
 
     @Test

@@ -278,6 +278,7 @@ private fun App(
                 onOpenSessions = { screen = Screen.SESSIONS },
                 onCloseSession = vm::closeSession,
                 onExportPdf = vm::exportPdf,
+                onExportGpx = vm::exportGpx,
                 // Le type MIME d'un .gpx varie selon l'appli qui l'a enregistré : tous les fichiers sont proposés.
                 onImportGpx = { gpxPicker.launch(arrayOf("*/*")) },
                 onAddNote = vm::addNote,

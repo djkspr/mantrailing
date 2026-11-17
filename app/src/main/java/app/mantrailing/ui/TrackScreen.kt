@@ -93,6 +93,8 @@ data class TrackActions(
     val onCloseSession: () -> Unit = {},
     /** Rapport PDF de la recherche ou de la piste affichée. */
     val onExportPdf: () -> Unit = {},
+    /** Fichier GPX de la recherche ou de la piste affichée. */
+    val onExportGpx: () -> Unit = {},
     /** Choisir un fichier GPX à importer (Garmin, autre appareil ou appli). */
     val onImportGpx: () -> Unit = {},
     val onAddNote: (NoteType, String?) -> Unit = { _, _ -> },
@@ -203,15 +205,15 @@ fun TrackScreen(
                         state.openedSession.weather?.let { append("\nMétéo au départ : ${it.summary}") }
                         state.openedSession.trailWeather?.let { append("\nPendant la pose : ${it.summary}") }
                     },
-                    pdfAction(state, actions),
                     "Fermer" to actions.onCloseSession,
+                    export = { ExportMenu(state.exporting, actions) },
                 )
                 state.openedTrail != null -> InfoBar(
                     "Piste posée le ${formatSessionDate(state.openedTrail.startedAt)}" +
                         (state.openedTrail.weather?.let { "\nMétéo pendant la pose : ${it.summary}" } ?: ""),
-                    pdfAction(state, actions),
                     "Lancer la recherche" to { actions.onStartSearchOnTrail(state.openedTrail) },
                     "Fermer" to actions.onCloseSession,
+                    export = { ExportMenu(state.exporting, actions) },
                 )
                 else -> {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -299,16 +301,28 @@ fun TrackScreen(
     }
 }
 
-/** « PDF » : rapport complet à envoyer ou enregistrer ; « PDF… » pendant sa création. */
-private fun pdfAction(state: UiState, actions: TrackActions): Pair<String, () -> Unit> =
-    (if (state.exporting) "PDF…" else "PDF") to { if (!state.exporting) actions.onExportPdf() }
+/** « Exporter » : rapport PDF ou fichier GPX, à envoyer ou enregistrer ; « Export… » pendant la création. */
+@Composable
+private fun ExportMenu(exporting: Boolean, actions: TrackActions) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }, enabled = !exporting, modifier = Modifier.testTag("export")) {
+            Text(if (exporting) "Export…" else "Exporter")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Rapport PDF") }, onClick = { open = false; actions.onExportPdf() })
+            DropdownMenuItem(text = { Text("Fichier GPX") }, onClick = { open = false; actions.onExportGpx() })
+        }
+    }
+}
 
 @Composable
-private fun InfoBar(text: String, vararg actions: Pair<String, () -> Unit>) {
+private fun InfoBar(text: String, vararg actions: Pair<String, () -> Unit>, export: (@Composable () -> Unit)? = null) {
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium) {
         Column(Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp)) {
             Text(text, Modifier.padding(end = 12.dp), style = MaterialTheme.typography.bodyMedium)
             Row(Modifier.align(Alignment.End)) {
+                export?.invoke()
                 actions.forEach { (label, onClick) -> TextButton(onClick = onClick) { Text(label) } }
             }
         }

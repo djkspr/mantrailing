@@ -279,10 +279,10 @@ fun writeReportPdf(report: Report, mapImage: Bitmap?, file: File, notesOnMap: Li
 fun reportsDir(context: Context) = File(context.cacheDir, "reports")
 
 /** Propose d'envoyer ou d'enregistrer le PDF (Drive, e-mail, Fichiers…). */
-fun shareReport(context: Context, file: File) {
+fun shareReport(context: Context, file: File, mimeType: String = "application/pdf") {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
     val send = Intent(Intent.ACTION_SEND)
-        .setType("application/pdf")
+        .setType(mimeType)
         .putExtra(Intent.EXTRA_STREAM, uri)
         .putExtra(Intent.EXTRA_SUBJECT, file.nameWithoutExtension.replace('_', ' '))
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

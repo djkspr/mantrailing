@@ -29,7 +29,10 @@ data class GpxTrack(val name: String?, val segments: List<List<Position>>, val h
         if (hasTimes) this else copy(segments = segments.map { seg -> seg.map { it.copy(time = it.time + start) } }, hasTimes = true)
 }
 
-/** Lecteur GPX 1.0 / 1.1 : traces (trk/trkseg/trkpt), sinon itinéraire (rte/rtept). */
+/**
+ * Lecteur GPX 1.0 / 1.1 : la première trace (trk/trkseg/trkpt) qui a des points, sinon le premier itinéraire
+ * (rte/rtept). Un fichier exporté par Mantrailing donne ainsi la trace du chien, pas la piste écrite après elle.
+ */
 object Gpx {
     private const val MAX_POINTS = 200_000
 
@@ -50,13 +53,14 @@ object Gpx {
         if (root?.localName != "gpx" && root?.nodeName?.substringAfter(':') != "gpx") throw GpxException("Ce fichier n'est pas un GPX.")
 
         val tracks = root.children("trk")
-        var raw: List<List<Element>> = tracks.flatMap { trk -> trk.children("trkseg").map { it.children("trkpt") } }
-        if (raw.all { it.isEmpty() }) raw = root.children("rte").map { it.children("rtept") }
+        val track = tracks.firstOrNull { trk -> trk.children("trkseg").any { it.children("trkpt").isNotEmpty() } }
+        var raw: List<List<Element>> = track?.children("trkseg")?.map { it.children("trkpt") }.orEmpty()
+        if (raw.all { it.isEmpty() }) raw = root.children("rte").take(1).map { it.children("rtept") }
         raw = raw.filter { it.isNotEmpty() }
         if (raw.isEmpty()) throw GpxException("Aucune trace dans ce fichier GPX.")
         if (raw.sumOf { it.size } > MAX_POINTS) throw GpxException("Trace trop longue (plus de $MAX_POINTS points).")
 
-        val name = (tracks.firstOrNull() ?: root.children("rte").firstOrNull())?.children("name")?.firstOrNull()?.textContent?.trim()
+        val name = (track ?: root.children("rte").firstOrNull())?.children("name")?.firstOrNull()?.textContent?.trim()
             ?: root.children("metadata").firstOrNull()?.children("name")?.firstOrNull()?.textContent?.trim()
         val times = raw.map { seg -> seg.map { pt -> pt.children("time").firstOrNull()?.textContent?.let(::parseTime) } }
         val hasTimes = times.all { seg -> seg.all { it != null } }
