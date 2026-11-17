@@ -51,6 +51,7 @@ import app.mantrailing.ui.SessionsScreen
 import app.mantrailing.ui.SettingsActions
 import app.mantrailing.ui.SettingsScreen
 import app.mantrailing.ui.SourceChoiceDialog
+import app.mantrailing.ui.ProgressScreen
 import app.mantrailing.ui.GpxImportDialog
 import app.mantrailing.ui.TrainingLogDialog
 import app.mantrailing.session.SCENT_ARTICLE_SUGGESTIONS
@@ -98,7 +99,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { HOME, SETTINGS, SESSIONS, HELP }
+private enum class Screen { HOME, SETTINGS, SESSIONS, HELP, PROGRESS }
 
 @Composable
 private fun App(
@@ -114,6 +115,14 @@ private fun App(
     var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
     // Écran d'où l'aide a été ouverte (accueil ou paramètres) : le retour y ramène.
     var helpFrom by rememberSaveable { mutableStateOf(Screen.HOME) }
+    // Progrès d'un chien : ouverts depuis « Mes pistes » ou les paramètres, on y revient.
+    var progressFrom by rememberSaveable { mutableStateOf(Screen.SESSIONS) }
+    var progressDogId by rememberSaveable { mutableStateOf<String?>(null) }
+    fun openProgress(dogId: String?, from: Screen) {
+        progressDogId = dogId ?: state.activeDogId
+        progressFrom = from
+        screen = Screen.PROGRESS
+    }
     fun openHelp(from: Screen) {
         helpFrom = from
         screen = Screen.HELP
@@ -231,6 +240,7 @@ private fun App(
                     onDeleteDog = vm::deleteDog,
                     onSelectDog = vm::selectDog,
                     onMoveDog = vm::moveDog,
+                    onDogProgress = { dog -> openProgress(dog.id, Screen.SETTINGS) },
                     onLogout = vm::logout,
                     onWeenectLogin = vm::loginWeenect,
                     onWeenectLogout = vm::logoutWeenect,
@@ -255,6 +265,10 @@ private fun App(
                 ),
             )
         }
+        screen == Screen.PROGRESS -> {
+            BackHandler { screen = progressFrom }
+            ProgressScreen(state.sessions, state.trails, state.dogs, progressDogId, onBack = { screen = progressFrom })
+        }
         screen == Screen.SESSIONS -> {
             BackHandler { screen = Screen.HOME }
             SessionsScreen(
@@ -269,6 +283,7 @@ private fun App(
                     onDeleteTrail = vm::deleteTrail,
                     onMoveSession = vm::moveSession,
                     onMoveTrail = vm::moveTrail,
+                    onProgress = { dogId -> openProgress(dogId, Screen.SESSIONS) },
                 ),
                 teams = state.cloud.teams,
             )

@@ -56,6 +56,8 @@ fun DogsSetting(
     onDelete: (Dog) -> Unit,
     teams: List<Team> = emptyList(),
     onMove: (Dog, String?) -> Unit = { _, _ -> },
+    /** Progrès du chien (null : pas d'entrée dans le menu). */
+    onProgress: ((Dog) -> Unit)? = null,
 ) {
     var adding by rememberSaveable { mutableStateOf(false) }
     var renamed by remember { mutableStateOf<Dog?>(null) }
@@ -92,6 +94,7 @@ fun DogsSetting(
                             Text("⋮")
                         }
                         DropdownMenu(expanded = menuFor == dog.id, onDismissRequest = { menuFor = null }) {
+                            onProgress?.let { open -> DropdownMenuItem(text = { Text("Progrès") }, onClick = { menuFor = null; open(dog) }) }
                             DropdownMenuItem(text = { Text("Renommer") }, onClick = { menuFor = null; renamed = dog })
                             if (teams.isNotEmpty()) {
                                 DropdownMenuItem(text = { Text("Partager avec…") }, onClick = { menuFor = null; moved = dog })

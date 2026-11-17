@@ -49,6 +49,8 @@ data class SessionsActions(
     /** Partage avec une équipe, ou retour en perso (null). */
     val onMoveSession: (TrailSession, String?) -> Unit = { _, _ -> },
     val onMoveTrail: (LaidTrail, String?) -> Unit = { _, _ -> },
+    /** Progrès d'un chien (celui du filtre, sinon le premier). */
+    val onProgress: (dogId: String?) -> Unit = {},
 )
 
 /** Élément à supprimer, en attente de confirmation. */
@@ -98,7 +100,10 @@ fun SessionsScreen(
             TextButton(onClick = actions.onBack, modifier = Modifier.semantics { contentDescription = "Retour" }) {
                 Text("←", style = MaterialTheme.typography.headlineSmall)
             }
-            Text("Mes pistes", style = MaterialTheme.typography.headlineSmall)
+            Text("Mes pistes", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+            if (allSessions.size >= 2) {
+                TextButton(onClick = { actions.onProgress(filterDog?.id) }, modifier = Modifier.testTag("open-progress")) { Text("Progrès") }
+            }
         }
         if (teams.isNotEmpty()) {
             Row(Modifier.horizontalScroll(rememberScrollState()).testTag("space-filter"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
