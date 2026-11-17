@@ -45,6 +45,7 @@ import app.mantrailing.TimeRange
 import app.mantrailing.UiState
 import app.mantrailing.demo.DemoSession
 import app.mantrailing.session.Dog
+import app.mantrailing.update.UpdateState
 import app.mantrailing.session.LaidTrail
 import app.mantrailing.session.NoteCategory
 import app.mantrailing.session.NoteType
@@ -94,7 +95,12 @@ data class TrackActions(
 
 /** Écran d'accueil : la carte, la pose d'une piste, la recherche en cours, ou une piste / recherche enregistrée. */
 @Composable
-fun TrackScreen(state: UiState, actions: TrackActions) {
+fun TrackScreen(
+    state: UiState,
+    actions: TrackActions,
+    update: UpdateState = UpdateState.None,
+    updateActions: UpdateActions = UpdateActions(),
+) {
     var menuOpen by remember { mutableStateOf(false) }
     var showPeriod by rememberSaveable { mutableStateOf(false) }
     var showAllNotes by rememberSaveable { mutableStateOf(false) }
@@ -144,6 +150,7 @@ fun TrackScreen(state: UiState, actions: TrackActions) {
                     }
                 }
             }
+            UpdateBanner(update, recording = state.recording != null, actions = updateActions)
             when {
                 state.recording != null -> {
                     RecordingBanner(state) {

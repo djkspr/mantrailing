@@ -37,6 +37,12 @@ import app.mantrailing.session.availableTrails
 import app.mantrailing.session.decideSource
 import app.mantrailing.ui.TrailChoiceDialog
 import java.time.Instant
+import androidx.lifecycle.lifecycleScope
+import app.mantrailing.ui.UpdateActions
+import app.mantrailing.update.AppUpdates
+import app.mantrailing.update.UpdateState
+import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import kotlinx.coroutines.launch
 import app.mantrailing.ui.CloudActions
 import app.mantrailing.ui.SpaceChoiceDialog
 import app.mantrailing.ui.SessionsActions
@@ -48,22 +54,56 @@ import app.mantrailing.ui.TrackActions
 import app.mantrailing.ui.TrackScreen
 
 class MainActivity : ComponentActivity() {
+    // Mises à jour proposées par Google Play (version installée depuis le Play Store).
+    private lateinit var updates: AppUpdates
+    private val updateLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
+        // Refus ou abandon dans la fenêtre de Google Play : la mise à jour reste proposée à la prochaine vérification.
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        updates = AppUpdates(AppUpdateManagerFactory.create(this))
         setContent {
             MantrailingTheme {
-                Surface(Modifier.fillMaxSize()) { App() }
+                Surface(Modifier.fillMaxSize()) {
+                    val update by updates.state.collectAsStateWithLifecycle()
+                    App(
+                        update = update,
+                        updateActions = UpdateActions(
+                            onUpdate = { updates.start(updateLauncher) },
+                            onInstall = updates::install,
+                        ),
+                    )
+                }
             }
         }
+    }
+
+    // À l'ouverture et à chaque retour dans l'appli : une version plus récente ? un téléchargement terminé entre-temps ?
+    override fun onResume() {
+        super.onResume()
+        lifecycleScope.launch { updates.check() }
+    }
+
+    override fun onDestroy() {
+        updates.dispose()
+        super.onDestroy()
     }
 }
 
 private enum class Screen { HOME, SETTINGS, SESSIONS }
 
 @Composable
-private fun App(vm: MainViewModel = viewModel()) {
+private fun App(
+    vm: MainViewModel = viewModel(),
+    update: UpdateState = UpdateState.None,
+    updateActions: UpdateActions = UpdateActions(),
+) {
     val state by vm.state.collectAsStateWithLifecycle()
+    // « Plus tard » : plus proposé avant la prochaine ouverture de l'appli (le téléchargement en cours reste affiché).
+    var updateLater by rememberSaveable { mutableStateOf(false) }
+    val shownUpdate = if (updateLater && update is UpdateState.Available) UpdateState.None else update
     val context = LocalContext.current
     var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
     var askSource by remember { mutableStateOf(false) }
@@ -235,6 +275,8 @@ private fun App(vm: MainViewModel = viewModel()) {
                 onUpdateNote = vm::updateNote,
                 onDeleteNote = vm::deleteNote,
             ),
+            update = shownUpdate,
+            updateActions = updateActions.copy(onLater = { updateLater = true }),
         )
     }
 
