@@ -20,7 +20,8 @@
 #>
 param(
     # Dossier de l'application Node (« Application root » du panneau Setup Node.js App), vu du compte FTP :
-    # « / » pour un compte FTP limité à ce dossier.
+    # « / » pour un compte FTP limité à ce dossier (mantrailing/api) ; « /mantrailing/api » pour un compte qui voit tout
+    # l'hébergement.
     [string]$RemotePath = "/",
     # Adresse publique de l'API ; par défaut celle de l'appli (gradle.properties, mantrailing.apiUrl).
     [string]$ApiUrl = "",
@@ -96,7 +97,7 @@ try {
         $session.Dispose()
     }
     if ($lockChanged) {
-        Write-Host "   Dépendances modifiées : dans cPanel › Setup Node.js App › mantrailing-api, clique « Run NPM Install » puis « Restart »." -ForegroundColor Yellow
+        Write-Host "   Dépendances modifiées : dans cPanel › Setup Node.js App › mantrailing/api, clique « Run NPM Install » puis « Restart »." -ForegroundColor Yellow
     }
 
     Write-Host "5/5 Vérification de $ApiUrl/version" -ForegroundColor Cyan

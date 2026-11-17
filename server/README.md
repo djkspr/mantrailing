@@ -51,14 +51,14 @@ $env:MANTRAILING_TEST_SERVER='http://127.0.0.1:3999'; .\gradlew.bat :app:testDeb
 3. **Application Node** — cPanel › Setup Node.js App › Create Application :
    - Node.js version : la plus récente proposée (22 ou plus) ;
    - Application mode : Production ;
-   - Application root : `mantrailing-api` ;
+   - Application root : `mantrailing/api` ;
    - Application URL : `mantrailing.lesbrasseursdupastel.fr` ;
    - Application startup file : `src/index.js`.
 
    Aucune variable d'environnement à saisir dans le panneau : les secrets sont dans un fichier hors du dossier
    de l'application (étape 5).
 4. **Compte FTP dédié** — cPanel › Comptes FTP : un compte (par exemple `mantrailing@lesbrasseursdupastel.fr`) dont
-   le répertoire est **limité à `mantrailing-api`** : le déploiement ne voit rien d'autre sur l'hébergement. Sur ce
+   le répertoire est **limité à `mantrailing/api`** : le déploiement ne voit rien d'autre sur l'hébergement. Sur ce
    poste, une fois :
 
    ```powershell
@@ -67,7 +67,7 @@ $env:MANTRAILING_TEST_SERVER='http://127.0.0.1:3999'; .\gradlew.bat :app:testDeb
 5. **Secrets du serveur** — posés à la main, une fois, **hors du site et du dossier de l'application** (comme pour
    l'API de la brasserie, mais dans un dossier à part) : cPanel › Gestionnaire de fichiers, « Afficher les fichiers
    cachés », créer `/home/gepi9588/.config/mantrailing/.env` à partir de `server/.env.example` (avec le mot de passe
-   de la base), puis Permissions : **600**. Le compte FTP de déploiement, limité à `mantrailing-api`, n'y a pas accès,
+   de la base), puis Permissions : **600**. Le compte FTP de déploiement, limité à `mantrailing/api`, n'y a pas accès,
    et `deploy.ps1` n'envoie jamais de `.env`.
 6. **WinSCP** — le paquet « WinSCP .NET assembly » (pas l'installateur) doit être extrait dans
    `tools/winscp-automation` à la racine de ce dépôt (non versionné ; déjà en place sur ce poste).
