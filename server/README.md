@@ -43,9 +43,9 @@ $env:MANTRAILING_TEST_SERVER='http://127.0.0.1:3999'; .\gradlew.bat :app:testDeb
 
 ## Mise en place chez o2switch (une fois)
 
-1. **Sous-domaine** — cPanel › Domaines : créer par exemple `mantrailing-api.lesbrasseursdupastel.fr`
-   (racine : `/home/<compte>/mantrailing-api`). Vérifier que le certificat HTTPS est émis (cPanel › SSL/TLS Status,
-   « Run AutoSSL » au besoin).
+1. **Domaine** — cPanel › Domaines : un domaine ou sous-domaine propre à Mantrailing (par exemple
+   `api.<domaine-mantrailing>`), racine `/home/<compte>/mantrailing-api`. Vérifier que le certificat HTTPS est
+   émis (cPanel › SSL/TLS Status, « Run AutoSSL » au besoin).
 2. **Base de données** — cPanel › Bases de données MySQL :
    - créer la base `<compte>_mantrailing` ;
    - créer l'utilisateur `<compte>_mantrailing` avec un mot de passe fort ;
@@ -67,11 +67,23 @@ $env:MANTRAILING_TEST_SERVER='http://127.0.0.1:3999'; .\gradlew.bat :app:testDeb
    | `GOOGLE_CLIENT_ID` | `1060303843038-k41u1rfk863q4kb8cvdq300eml85s73p.apps.googleusercontent.com` |
 
    Enregistrer (« Save »).
-4. **Premier envoi** — depuis la racine du dépôt :
-   `.\server\deploy.ps1 -ApiUrl https://mantrailing-api.lesbrasseursdupastel.fr`
-   (identifiants FTP dans `FTP_USER` / `FTP_PASS`, comme pour l'autre projet). Puis dans Setup Node.js App :
-   **Run NPM Install**, puis **Restart**. `https://<sous-domaine>/version` doit répondre.
-5. **Brancher l'appli** — mettre l'adresse dans `gradle.properties` (`mantrailing.apiUrl=https://…`), puis publier
+4. **Compte FTP dédié** — cPanel › Comptes FTP : créer un compte (par exemple `mantrailing@<domaine>`) dont le
+   répertoire est **limité à `mantrailing-api`** : le déploiement ne voit rien d'autre sur l'hébergement. Sur ce poste,
+   variables d'environnement (utilisateur Windows) :
+
+   | Variable | Valeur |
+   |---|---|
+   | `MANTRAILING_FTP_HOST` | serveur FTP indiqué par cPanel (par exemple `ftp.<domaine>`) |
+   | `MANTRAILING_FTP_USER` | le compte FTP dédié |
+   | `MANTRAILING_FTP_PASS` | son mot de passe |
+
+   Le dossier distant devient alors la racine de ce compte : lancer le déploiement avec `-RemotePath /`.
+5. **WinSCP** — télécharger le paquet « WinSCP .NET assembly » sur winscp.net (pas l'installateur) et l'extraire
+   dans `tools/winscp-automation` à la racine de ce dépôt (non versionné).
+6. **Premier envoi** — depuis la racine du dépôt :
+   `.\server\deploy.ps1 -ApiUrl https://api.<domaine-mantrailing> -RemotePath /`
+   Puis dans Setup Node.js App : **Run NPM Install**, puis **Restart**. `https://<domaine>/version` doit répondre.
+7. **Brancher l'appli** — mettre l'adresse dans `gradle.properties` (`mantrailing.apiUrl=https://…`), puis publier
    l'appli. Tant que cette adresse est vide, la sauvegarde en ligne n'apparaît pas dans l'appli.
 
 ## Envois suivants

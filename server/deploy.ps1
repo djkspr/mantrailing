@@ -11,8 +11,8 @@
     4. Redémarrage : tmp/restart.txt (signal de Passenger).
     5. GET <adresse>/version doit renvoyer le commit envoyé.
 
-    Identifiants FTP : variables FTP_USER et FTP_PASS (les mêmes que pour l'autre projet si c'est le même
-    compte o2switch). Hôte : MANTRAILING_FTP_HOST, sinon ftp.lesbrasseursdupastel.fr.
+    FTP : variables MANTRAILING_FTP_HOST, MANTRAILING_FTP_USER et MANTRAILING_FTP_PASS, propres à ce projet
+    (idéalement un compte FTP o2switch limité au dossier de l'API, voir README).
 
 .EXAMPLE
     .\server\deploy.ps1
@@ -35,15 +35,16 @@ if (-not $ApiUrl) {
     $ApiUrl = ($line -replace '^\s*mantrailing\.apiUrl\s*=\s*', '').Trim().TrimEnd('/')
 }
 if (-not $ApiUrl) { throw "Adresse de l'API inconnue : renseigne mantrailing.apiUrl dans gradle.properties (ou -ApiUrl)." }
-if (-not $env:FTP_USER -or -not $env:FTP_PASS) { throw "Variables FTP_USER et FTP_PASS absentes (compte FTP o2switch)." }
-$ftpHost = if ($env:MANTRAILING_FTP_HOST) { $env:MANTRAILING_FTP_HOST } else { 'ftp.lesbrasseursdupastel.fr' }
+$missingFtp = @("MANTRAILING_FTP_HOST", "MANTRAILING_FTP_USER", "MANTRAILING_FTP_PASS") | Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+if ($missingFtp) { throw "Variables FTP absentes : $($missingFtp -join ", ") (compte FTP o2switch de l'API, voir server/README.md)." }
+$ftpHost = $env:MANTRAILING_FTP_HOST
 
-# Paquet « WinSCP .NET assembly » (build netstandard2.0), déjà extrait pour Les Brasseurs du Pastel.
+# Paquet « WinSCP .NET assembly » (build netstandard2.0) extrait dans tools/winscp-automation (non versionné).
 $automationRoot = if ($env:WINSCP_AUTOMATION) { $env:WINSCP_AUTOMATION } else {
-    Join-Path $env:USERPROFILE 'source\lesbrasseursdupastel\winscp-automation'
+    Join-Path $repoRoot 'tools\winscp-automation'
 }
 $assembly = Join-Path $automationRoot 'netstandard2.0\WinSCPnet.dll'
-if (-not (Test-Path $assembly)) { throw "WinSCP .NET assembly introuvable ($assembly) : définis WINSCP_AUTOMATION." }
+if (-not (Test-Path $assembly)) { throw "WinSCP .NET assembly introuvable ($assembly) : télécharge « WinSCP .NET assembly » sur winscp.net et extrais-le là (ou définis WINSCP_AUTOMATION)." }
 
 Push-Location $serverDir
 try {
@@ -65,8 +66,8 @@ try {
     $options = New-Object WinSCP.SessionOptions -Property @{
         Protocol = [WinSCP.Protocol]::Ftp
         HostName = $ftpHost
-        UserName = $env:FTP_USER
-        Password = $env:FTP_PASS
+        UserName = $env:MANTRAILING_FTP_USER
+        Password = $env:MANTRAILING_FTP_PASS
     }
     $session = New-Object WinSCP.Session
     $session.ExecutablePath = Join-Path $automationRoot 'WinSCP.exe'
