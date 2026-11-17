@@ -49,6 +49,8 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.ui.semantics.Role
 import app.mantrailing.BuildConfig
 import app.mantrailing.UiState
+import app.mantrailing.offline.OfflineZone
+import app.mantrailing.offline.offlineSummary
 import app.mantrailing.session.NoteType
 import app.mantrailing.session.TrackSource
 import app.mantrailing.session.Dog
@@ -78,6 +80,8 @@ data class SettingsActions(
     val cloud: CloudActions = CloudActions(),
     /** Revoir le tour guidé du premier lancement. */
     val onReplayTour: () -> Unit = {},
+    /** Supprime une zone de carte téléchargée. */
+    val onDeleteOfflineZone: (OfflineZone) -> Unit = {},
 )
 
 /** Rubriques des paramètres : chacune a sa page, le menu les résume en une ligne. */
@@ -87,6 +91,7 @@ enum class SettingsPage(val title: String, val tag: String) {
     BACKUP("Sauvegarde en ligne", "backup"),
     TEAMS("Équipes", "teams"),
     NOTES("Notes rapides", "notes"),
+    OFFLINE("Cartes hors ligne", "offline"),
     ABOUT("À propos", "about"),
 }
 
@@ -113,6 +118,7 @@ fun settingsSummary(page: SettingsPage, state: UiState, now: Long): String = whe
         state.cloud.teams.isEmpty() -> "Aucune équipe"
         else -> state.cloud.teams.joinToString { it.name }
     }
+    SettingsPage.OFFLINE -> state.offlineDownload?.let { "Téléchargement en cours · ${it.percent} %" } ?: offlineSummary(state.offlineZones)
     SettingsPage.NOTES -> "${state.quickNotes.size} bouton${if (state.quickNotes.size > 1) "s" else ""} pendant la recherche"
     SettingsPage.ABOUT -> "Confidentialité, version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
 }
@@ -175,6 +181,7 @@ private fun SettingsPageContent(page: SettingsPage?, state: UiState, actions: Se
                 TeamsSetting(state.cloud, actions.cloud)
             }
             SettingsPage.NOTES -> QuickNotesSetting(state.quickNotes, actions.onQuickNotes)
+            SettingsPage.OFFLINE -> OfflineMapsSetting(state.offlineZones, state.offlineDownload, actions.onDeleteOfflineZone)
             SettingsPage.ABOUT -> AboutSetting(actions.onReplayTour)
         }
     }

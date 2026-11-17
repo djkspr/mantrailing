@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,6 +50,13 @@ import app.mantrailing.demo.DemoSession
 import app.mantrailing.session.Dog
 import app.mantrailing.session.LAYING_CATEGORIES
 import app.mantrailing.session.LAYING_QUICK_NOTES
+import app.mantrailing.offline.AVERAGE_TILE_BYTES
+import app.mantrailing.offline.Area
+import app.mantrailing.offline.OFFLINE_MAX_TILES
+import app.mantrailing.offline.OfflineDownload
+import app.mantrailing.offline.downloadArea
+import app.mantrailing.offline.estimateTiles
+import app.mantrailing.offline.formatBytes
 import app.mantrailing.session.locateNotes
 import app.mantrailing.session.SEARCH_CATEGORIES
 import app.mantrailing.update.UpdateState
@@ -100,6 +109,9 @@ data class TrackActions(
     val onImportGpx: () -> Unit = {},
     /** Écran d'aide (mode d'emploi). */
     val onOpenHelp: () -> Unit = {},
+    /** Télécharger le plan IGN de la zone affichée, pour l'usage sans réseau. */
+    val onDownloadArea: (Area) -> Unit = {},
+    val onCancelDownload: () -> Unit = {},
     val onAddNote: (NoteType, String?) -> Unit = { _, _ -> },
     val onUndoNote: () -> Unit = {},
     val onUpdateNote: (SearchNote) -> Unit = {},
@@ -119,6 +131,9 @@ fun TrackScreen(
     updateActions: UpdateActions = UpdateActions(),
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    // Zone affichée par la carte, et zone proposée au téléchargement (confirmation).
+    var visibleArea by remember { mutableStateOf<Area?>(null) }
+    var askDownload by remember { mutableStateOf<Area?>(null) }
     var showPeriod by rememberSaveable { mutableStateOf(false) }
     var showAllNotes by rememberSaveable { mutableStateOf(false) }
     var showNotesList by rememberSaveable { mutableStateOf(false) }
@@ -161,6 +176,11 @@ fun TrackScreen(
                         DropdownMenuItem(text = { Text("Mes pistes") }, onClick = { menuOpen = false; actions.onOpenSessions() })
                         if (state.recording == null && !state.demo) {
                             DropdownMenuItem(text = { Text("Importer un fichier GPX") }, onClick = { menuOpen = false; actions.onImportGpx() })
+                            DropdownMenuItem(
+                                text = { Text("Télécharger cette zone") },
+                                enabled = visibleArea != null && state.offlineDownload == null,
+                                onClick = { menuOpen = false; askDownload = visibleArea },
+                            )
                         }
                         if (state.connected && !state.demo) {
                             DropdownMenuItem(
@@ -259,7 +279,9 @@ fun TrackScreen(
                 state.segments, Modifier.fillMaxSize(), trail = if (laying) state.recordingTrack else state.trailLine,
                 notes = state.notes + state.trailNotes + layingNotes, follow = laying,
                 onNoteClick = { note -> if (state.trailNotes.any { it.id == note.id }) trailNoteId = note.id else editedNoteId = note.id },
+                onVisibleArea = { visibleArea = it },
             )
+            state.offlineDownload?.let { OfflineProgress(it, actions.onCancelDownload, Modifier.align(Alignment.TopStart).padding(8.dp)) }
             val idle = !state.demo && state.recording == null && state.openedSession == null && state.openedTrail == null && state.segments.isEmpty()
             if (state.tractive == null && state.dogs.isEmpty() && idle && !touring) Welcome(actions, Modifier.align(Alignment.Center))
             state.message?.let { msg ->
@@ -282,6 +304,9 @@ fun TrackScreen(
     }
     if (askOutcome) {
         OutcomeDialog(onFinish = { askOutcome = false; actions.onStopRecording(it) }, onDismiss = { askOutcome = false })
+    }
+    askDownload?.let { area ->
+        OfflineDownloadDialog(area, onConfirm = { askDownload = null; actions.onDownloadArea(it) }, onDismiss = { askDownload = null })
     }
     if (showAllNotes) {
         val laying = state.recording?.kind == RecordingKind.TRAIL
@@ -610,4 +635,42 @@ fun formatDuration(seconds: Long): String = when {
     seconds < 60 -> "$seconds s"
     seconds < 3600 -> "${seconds / 60} min" + (seconds % 60).let { if (it > 0) " ${it}s" else "" }
     else -> "${seconds / 3600} h ${"%02d".format((seconds % 3600) / 60)}"
+}
+
+/** Téléchargement de carte en cours, sur la carte : pourcentage et « Annuler ». */
+@Composable
+private fun OfflineProgress(download: OfflineDownload, onCancel: () -> Unit, modifier: Modifier) {
+    Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.medium, tonalElevation = 4.dp, modifier = modifier.testTag("offline-progress")) {
+        Column(Modifier.padding(start = 12.dp, top = 8.dp, end = 4.dp).width(220.dp)) {
+            Text("Carte hors ligne · ${download.percent} %", style = MaterialTheme.typography.labelLarge)
+            LinearProgressIndicator(progress = { download.percent / 100f }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp, end = 8.dp))
+            TextButton(onClick = onCancel, modifier = Modifier.align(Alignment.End)) { Text("Annuler") }
+        }
+    }
+}
+
+/** Confirmation avant de télécharger : zone, estimation du nombre de tuiles et du poids. */
+@Composable
+fun OfflineDownloadDialog(visible: Area, onConfirm: (Area) -> Unit, onDismiss: () -> Unit) {
+    val area = remember(visible) { downloadArea(visible) }
+    val tiles = remember(area) { estimateTiles(area) }
+    val tooBig = tiles > OFFLINE_MAX_TILES
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Télécharger cette zone ?") },
+        text = {
+            Text(
+                buildString {
+                    if (area != visible) append("Carte trop dézoomée : seuls les 3 km autour du centre seront téléchargés.\n\n")
+                    append("Plan IGN, du quartier au chemin : environ $tiles tuiles, ${formatBytes(tiles * AVERAGE_TILE_BYTES)}. ")
+                    append(if (tooBig) "C'est trop : rapprochez la carte du terrain d'entraînement." else "La carte de cette zone s'affichera ensuite sans réseau (Wi-Fi conseillé).")
+                },
+                modifier = Modifier.testTag("offline-estimate"),
+            )
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(visible) }, enabled = !tooBig, modifier = Modifier.testTag("offline-confirm")) { Text("Télécharger") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
 }

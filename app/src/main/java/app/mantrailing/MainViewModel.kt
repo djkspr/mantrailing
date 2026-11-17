@@ -48,6 +48,14 @@ import app.mantrailing.track.TrackStats
 import app.mantrailing.tractive.Position
 import app.mantrailing.tractive.TractiveApi
 import app.mantrailing.weenect.WeenectApi
+import app.mantrailing.offline.Area
+import app.mantrailing.offline.OFFLINE_MAX_TILES
+import app.mantrailing.offline.OfflineDownload
+import app.mantrailing.offline.OfflineMaps
+import app.mantrailing.offline.OfflineZone
+import app.mantrailing.offline.downloadArea
+import app.mantrailing.offline.estimateTiles
+import app.mantrailing.ui.formatSessionDate
 import app.mantrailing.weenect.WeenectAuthException
 import app.mantrailing.weenect.WeenectSession
 import app.mantrailing.gpx.Gpx
@@ -155,6 +163,10 @@ data class UiState(
     val cloud: CloudState = CloudState(),
     /** Espace de la dernière piste ou recherche (null : perso), proposé la fois suivante. */
     val lastSpaceId: String? = null,
+    /** Zones de carte téléchargées pour l'usage sans réseau. */
+    val offlineZones: List<OfflineZone> = emptyList(),
+    /** Téléchargement de carte en cours. */
+    val offlineDownload: OfflineDownload? = null,
 ) {
     val activeDog: Dog? get() = dogs.find { it.id == activeDogId }
 
@@ -214,6 +226,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = SessionStore(app)
     private val api = TractiveApi()
     private val weenectApi = WeenectApi()
+    private val offlineMaps = OfflineMaps(app)
+    /** Zone en cours de téléchargement (pour l'annuler). */
+    private var downloadingZone: Long? = null
     /** Renouvellement du super live Weenect pendant une recherche. */
     private var weenectLive: Job? = null
     private val weatherApi = WeatherApi()
@@ -226,6 +241,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun journalOf(spaceId: String?) = AppStorage.syncJournal(getApplication(), spaceId)
 
     init {
+        // Cartes hors ligne : cache des zones regardées agrandi, puis liste des zones téléchargées.
+        viewModelScope.launch {
+            runCatching { offlineMaps.raiseAmbientCache() }
+            refreshOfflineZones()
+        }
         viewModelScope.launch {
             val tractive = store.tractive.first()
             val weenect = store.weenect.first()
@@ -1077,6 +1097,69 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeSession() = _state.update { it.clearedDisplay() }
+
+    // ---------- Cartes hors ligne ----------
+
+    private suspend fun refreshOfflineZones() {
+        runCatching { offlineMaps.zones() }.onSuccess { zones -> _state.update { it.copy(offlineZones = zones) } }
+    }
+
+    /**
+     * Télécharge le plan IGN de la zone affichée (ou de 3 km autour de son centre si la carte est trop dézoomée),
+     * pour s'en servir sans réseau. Le téléchargement continue si l'on change d'écran.
+     */
+    fun downloadOfflineArea(visible: Area) {
+        if (_state.value.offlineDownload != null) return
+        val area = downloadArea(visible)
+        val tiles = estimateTiles(area)
+        if (tiles > OFFLINE_MAX_TILES) {
+            _state.update { it.copy(message = "Zone trop grande : rapprochez la carte du terrain d'entraînement.") }
+            return
+        }
+        val now = Instant.now().epochSecond
+        val name = "Zone du ${formatSessionDate(now)}"
+        _state.update { it.copy(offlineDownload = OfflineDownload(name, 0, tiles)) }
+        viewModelScope.launch {
+            try {
+                downloadingZone = offlineMaps.download(
+                    area, name, now,
+                    onProgress = { p -> _state.update { s -> s.copy(offlineDownload = s.offlineDownload?.copy(percent = p)) } },
+                    onDone = { error ->
+                        downloadingZone = null
+                        _state.update {
+                            it.copy(
+                                offlineDownload = null,
+                                message = error ?: "« $name » téléchargée : la carte s'affiche sans réseau dans cette zone.",
+                            )
+                        }
+                        viewModelScope.launch { refreshOfflineZones() }
+                    },
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(offlineDownload = null, message = "Téléchargement impossible : ${e.message}") }
+            }
+        }
+    }
+
+    fun cancelOfflineDownload() {
+        val id = downloadingZone
+        downloadingZone = null
+        _state.update { it.copy(offlineDownload = null) }
+        viewModelScope.launch {
+            id?.let { runCatching { offlineMaps.delete(it) } }
+            refreshOfflineZones()
+        }
+    }
+
+    fun deleteOfflineZone(zone: OfflineZone) {
+        viewModelScope.launch {
+            runCatching { offlineMaps.delete(zone.id) }
+                .onFailure { e -> _state.update { it.copy(message = "Suppression impossible : ${e.message}") } }
+            refreshOfflineZones()
+        }
+    }
 
     // ---------- Import d'un fichier GPX (Garmin, autre appareil ou appli) ----------
 

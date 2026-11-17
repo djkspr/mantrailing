@@ -34,6 +34,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.mantrailing.session.NoteCategory
+import app.mantrailing.offline.Area
 import app.mantrailing.session.SearchNote
 import app.mantrailing.tractive.Position
 import org.maplibre.android.MapLibre
@@ -62,6 +63,9 @@ private fun ign(layer: String, format: String) =
     "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=$layer" +
         "&STYLE=normal&TILEMATRIXSET=PM&FORMAT=$format&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}"
 
+/** Tuiles du plan IGN : même adresse pour la carte et les zones téléchargées (cartes hors ligne). */
+val IGN_PLAN_TILES = ign("GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2", "image/png")
+
 /** Style de carte (fonds IGN, OSM), aussi utilisé pour l'image des rapports PDF. */
 val MAP_STYLE_JSON = """
 {
@@ -69,7 +73,7 @@ val MAP_STYLE_JSON = """
   "center": [2.4, 46.6], "zoom": 5,
   "sources": {
     "plan": { "type": "raster", "tileSize": 256, "maxzoom": 19, "attribution": "© IGN",
-              "tiles": ["${ign("GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2", "image/png")}"] },
+              "tiles": ["$IGN_PLAN_TILES"] },
     "photo": { "type": "raster", "tileSize": 256, "maxzoom": 19, "attribution": "© IGN",
                "tiles": ["${ign("ORTHOIMAGERY.ORTHOPHOTOS", "image/jpeg")}"] },
     "osm": { "type": "raster", "tileSize": 256, "maxzoom": 19, "attribution": "© OpenStreetMap, © CARTO",
@@ -101,8 +105,11 @@ fun TrackMap(
     onNoteClick: (SearchNote) -> Unit = {},
     /** Pose en cours : la carte suit la dernière position, tant qu'on ne la déplace pas à la main. */
     follow: Boolean = false,
+    /** Zone visible, à chaque arrêt de la carte (téléchargement pour l'usage hors ligne). */
+    onVisibleArea: (Area) -> Unit = {},
 ) {
     val currentNotes by rememberUpdatedState(notes)
+    val currentOnVisibleArea by rememberUpdatedState(onVisibleArea)
     val currentOnNoteClick by rememberUpdatedState(onNoteClick)
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -233,6 +240,10 @@ fun TrackMap(
                         PropertyFactory.circleStrokeWidth(3f),
                     ),
                 )
+                m.addOnCameraIdleListener {
+                    val b = m.projection.visibleRegion.latLngBounds
+                    currentOnVisibleArea(Area(b.latitudeSouth, b.longitudeWest, b.latitudeNorth, b.longitudeEast))
+                }
                 m.addOnCameraMoveStartedListener { reason ->
                     if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) following = false
                 }

@@ -100,6 +100,14 @@ val HELP_SECTIONS = listOf(
         ),
     ),
     HelpSection(
+        "offline", "Cartes hors ligne",
+        listOf(
+            "En forêt, le réseau manque souvent : avant de partir, cadrez la carte sur le terrain d'entraînement, puis menu ⋮ › « Télécharger cette zone » (Wi-Fi conseillé). Le plan IGN de la zone s'affiche ensuite sans réseau.",
+            "Une zone fait au plus quelques kilomètres de côté, du quartier au chemin. Carte trop dézoomée : seuls les 3 km autour du centre sont pris.",
+            "Les zones se gèrent dans Paramètres › Cartes hors ligne. Les endroits regardés récemment restent aussi en mémoire, sans téléchargement.",
+        ),
+    ),
+    HelpSection(
         "collars", "Colliers GPS",
         listOf(
             "Connectez votre compte Tractive ou Weenect dans Paramètres › Colliers GPS : les chiens et leurs colliers sont importés.",
